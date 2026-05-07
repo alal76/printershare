@@ -1,0 +1,42 @@
+{
+  "03f0:2b17": {
+    "make": "HP", "model": "LaserJet Pro M404n",
+    "name": "HP LaserJet Pro M404n",
+    "capabilities": { "print": true,  "scan": false, "fax": false, "escl": false }
+  },
+  "04b8:0166": {
+    "make": "Epson", "model": "Perfection V39",
+    "name": "Epson Perfection V39",
+    "capabilities": { "print": false, "scan": true,  "fax": false, "escl": false }
+  },
+  "04b8:0895": {
+    "make": "Epson", "model": "EcoTank ET-2720",
+    "name": "Epson EcoTank ET-2720",
+    "capabilities": { "print": true,  "scan": true,  "fax": false, "escl": true }
+  },
+  "04a9:2228": {
+    "make": "Canon", "model": "PIXMA TS3522",
+    "name": "Canon PIXMA TS3522",
+    "capabilities": { "print": true,  "scan": true,  "fax": false, "escl": true }
+  },
+  "04a9:177c": {
+    "make": "Canon", "model": "LiDE 300",
+    "name": "Canon CanoScan LiDE 300",
+    "capabilities": { "print": false, "scan": true,  "fax": false, "escl": false }
+  },
+  "03f0:3817": {
+    "make": "HP", "model": "DeskJet 2755",
+    "name": "HP DeskJet 2755",
+    "capabilities": { "print": true,  "scan": true,  "fax": false, "escl": true }
+  },
+  "04e8:3469": {
+    "make": "Samsung", "model": "ML-2165",
+    "name": "Samsung ML-2165 Laser Printer",
+    "capabilities": { "print": true,  "scan": false, "fax": false, "escl": false }
+  },
+  "04f9:00df": {
+    "make": "Brother", "model": "MFC-L2710DW",
+    "name": "Brother MFC-L2710DW",
+    "capabilities": { "print": true,  "scan": true,  "fax": true,  "escl": true }
+  }
+}

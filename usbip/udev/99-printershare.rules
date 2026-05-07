@@ -1,0 +1,19 @@
+# /etc/udev/rules.d/99-printershare.rules
+# Hotplug rules for printershare USB devices.
+# Install with: sudo usbip/install-udev.sh
+
+# Bind any USB printer (class 07) to the ipp-usb/usbip stack on connect
+ACTION=="add", SUBSYSTEM=="usb", ATTR{bDeviceClass}=="00", ATTR{bInterfaceClass}=="07", \
+  TAG+="printershare", RUN+="/usr/local/bin/ps-usb-bind.sh %k"
+
+# Match specific known VID:PID devices
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="03f0", TAG+="printershare-hp",  \
+  RUN+="/usr/local/bin/ps-usb-bind.sh %k"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="04b8", TAG+="printershare-epson", \
+  RUN+="/usr/local/bin/ps-usb-bind.sh %k"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="04a9", TAG+="printershare-canon", \
+  RUN+="/usr/local/bin/ps-usb-bind.sh %k"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="04f9", TAG+="printershare-brother", \
+  RUN+="/usr/local/bin/ps-usb-bind.sh %k"
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", TAG+="printershare-samsung", \
+  RUN+="/usr/local/bin/ps-usb-bind.sh %k"

@@ -1,6 +1,6 @@
 FROM sbs20/scanservjs:release
 
-LABEL description="Scanservjs web scanner UI with rclone for Google Drive / OneDrive upload"
+LABEL description="Scanservjs web scanner UI with AirScan/eSCL support and rclone cloud upload"
 
 ENV RCLONE_VERSION=v1.67.0
 
@@ -12,7 +12,11 @@ RUN set -eux; \
         armv7l)  RCLONE_ARCH="arm-v7"  ;; \
         *)       echo "Unsupported arch: $ARCH" >&2; exit 1 ;; \
     esac; \
-    apt-get update -qq && apt-get install -y --no-install-recommends unzip curl && \
+    apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        unzip curl \
+        sane-airscan \
+        && \
     curl -fsSL \
         "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${RCLONE_ARCH}.zip" \
         -o /tmp/rclone.zip && \
