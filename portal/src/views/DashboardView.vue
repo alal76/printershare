@@ -7,7 +7,9 @@
       <div class="flex items-start gap-3">
         <AlertCircleIcon class="w-5 h-5 text-amber-500 mt-0.5" />
         <div class="flex-1">
-          <p class="text-sm font-semibold text-gray-900">Initial setup not completed</p>
+          <p class="text-sm font-semibold text-gray-900">
+            Initial setup not completed
+          </p>
           <p class="text-sm text-gray-500 mt-1">
             You can use the dashboard immediately, then run the setup wizard when ready.
           </p>
@@ -63,6 +65,7 @@
           <div
             v-for="(svc, name) in system.health.services"
             :key="name"
+            :data-testid="`service-${name}`"
             class="bg-white rounded-2xl border p-4 flex items-center gap-3 transition-colors"
             :class="svc.status === 'ok' ? 'border-green-100' : svc.status === 'error' ? 'border-red-100' : 'border-gray-100'"
           >
@@ -210,8 +213,12 @@
             :key="printer.name"
             class="p-2 rounded-xl border border-gray-100"
           >
-            <p class="text-sm font-medium text-gray-900 truncate">{{ printer.name }}</p>
-            <p class="text-xs text-gray-500 truncate">{{ printer.uri }}</p>
+            <p class="text-sm font-medium text-gray-900 truncate">
+              {{ printer.name }}
+            </p>
+            <p class="text-xs text-gray-500 truncate">
+              {{ printer.uri }}
+            </p>
           </div>
         </div>
       </Card>
@@ -235,8 +242,12 @@
             :key="usb.vidpid"
             class="p-2 rounded-xl border border-gray-100"
           >
-            <p class="text-sm font-medium text-gray-900 truncate">{{ usb.name }}</p>
-            <p class="text-xs text-gray-500">{{ usb.vidpid }}</p>
+            <p class="text-sm font-medium text-gray-900 truncate">
+              {{ usb.name }}
+            </p>
+            <p class="text-xs text-gray-500">
+              {{ usb.vidpid }}
+            </p>
           </div>
         </div>
       </Card>

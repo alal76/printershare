@@ -20,20 +20,32 @@
       >
         <SettingsIcon class="w-5 h-5" />
       </RouterLink>
+      <button
+        v-if="auth.authEnabled"
+        type="button"
+        class="p-1.5 text-gray-500 hover:text-gray-900"
+        title="Sign out"
+        @click="onLogout"
+      >
+        <LogOutIcon class="w-5 h-5" />
+      </button>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
 import { computed }     from 'vue'
-import { useRoute }     from 'vue-router'
-import { SettingsIcon } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
+import { SettingsIcon, LogOutIcon } from 'lucide-vue-next'
 import { useSystemStore } from '@/stores/system'
+import { useAuthStore } from '@/stores/auth'
 
 defineProps<{ title?: string }>()
 
 const route  = useRoute()
+const router = useRouter()
 const system = useSystemStore()
+const auth = useAuthStore()
 
 const routeTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -58,5 +70,10 @@ function dotClass(status: string) {
     'bg-yellow-400': status === 'offline',
     'bg-gray-300':   !status || status === 'unknown',
   }
+}
+
+async function onLogout() {
+  await auth.logout()
+  await router.push('/login')
 }
 </script>

@@ -140,6 +140,7 @@
             v-for="d in devices.usb"
             :key="d.vidpid"
             :padding="false"
+            :data-testid="`usb-device-${d.vidpid.replace(':', '-')}`"
           >
             <div class="flex items-center gap-4 p-4">
               <!-- Device icon -->
@@ -173,18 +174,22 @@
                 <span
                   v-if="d.capabilities.print"
                   class="badge-blue"
+                  :data-testid="`usb-cap-print-${d.vidpid.replace(':', '-')}`"
                 >Print</span>
                 <span
                   v-if="d.capabilities.scan"
                   class="badge-green"
+                  :data-testid="`usb-cap-scan-${d.vidpid.replace(':', '-')}`"
                 >Scan</span>
                 <span
                   v-if="d.capabilities.escl"
                   class="badge-purple"
+                  :data-testid="`usb-cap-escl-${d.vidpid.replace(':', '-')}`"
                 >AirScan</span>
                 <span
                   v-if="d.capabilities.fax"
                   class="badge-gray"
+                  :data-testid="`usb-cap-fax-${d.vidpid.replace(':', '-')}`"
                 >Fax</span>
               </div>
             </div>

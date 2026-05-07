@@ -55,6 +55,7 @@
               type="button"
               class="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors flex-shrink-0"
               :title="`Copy ${p.label} path`"
+              :aria-label="`Copy ${p.label} path`"
               @click="copy(p.path, p.label)"
             >
               <CopyIcon class="w-3.5 h-3.5" />
@@ -115,6 +116,7 @@
               type="button"
               class="p-1.5 rounded-lg text-gray-400 hover:text-primary-600 hover:bg-primary-50 transition-colors flex-shrink-0"
               :title="`Copy ${n.label} command`"
+              :aria-label="`Copy ${n.label} command`"
               @click="copy(n.cmd, n.label)"
             >
               <CopyIcon class="w-3.5 h-3.5" />

@@ -19,7 +19,7 @@ type Status = 'ok' | 'warning' | 'error' | 'pending' | 'offline' | 'unknown'
 const props = withDefaults(defineProps<{
   status: Status
   label?: string
-}>(), { status: 'unknown' })
+}>(), { status: 'unknown', label: '' })
 
 const config: Record<Status, { bg: string; dot: string; text: string }> = {
   ok:      { bg: 'bg-green-50',  dot: 'bg-green-500',  text: 'Online' },

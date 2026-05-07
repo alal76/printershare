@@ -23,6 +23,7 @@
 
 const express = require('express');
 const path    = require('node:path');
+const { AUTH_ENABLED, readSessionToken, verifySessionToken } = require('./lib/auth');
 
 const app = express();
 
@@ -33,41 +34,25 @@ app.use(express.urlencoded({ extended: false }));
 // Remove the X-Powered-By header to reduce information disclosure.
 app.disable('x-powered-by');
 
-// Optional API auth gate.
-// Enable by setting PORTAL_AUTH=true and provide credentials via:
-//   PORTAL_USER (default: admin)
-//   PORTAL_PASS (default: PORTAL_SECRET)
-const AUTH_ENABLED = String(process.env.PORTAL_AUTH || 'false').toLowerCase() === 'true';
-const AUTH_USER = process.env.PORTAL_USER || 'admin';
-const AUTH_PASS = process.env.PORTAL_PASS || process.env.PORTAL_SECRET || '';
-
 function requireApiAuth(req, res, next) {
   if (!AUTH_ENABLED) return next();
 
-  // Keep health probes unauthenticated.
-  if (req.path === '/health' || req.path === '/api/v1/health' || req.path.startsWith('/api/v1/health/')) {
+  if (!req.path.startsWith('/api/')) return next();
+
+  // Keep health and auth endpoints unauthenticated.
+  if (
+    req.path === '/api/v1/health' ||
+    req.path.startsWith('/api/v1/health/') ||
+    req.path === '/api/v1/auth/login' ||
+    req.path === '/api/v1/auth/me' ||
+    req.path === '/api/v1/auth/config'
+  ) {
     return next();
   }
 
-  const raw = req.headers.authorization || '';
-  if (!raw.startsWith('Basic ')) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="printershare"');
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-
-  try {
-    const decoded = Buffer.from(raw.slice(6), 'base64').toString('utf8');
-    const idx = decoded.indexOf(':');
-    const user = idx >= 0 ? decoded.slice(0, idx) : decoded;
-    const pass = idx >= 0 ? decoded.slice(idx + 1) : '';
-    if (user !== AUTH_USER || pass !== AUTH_PASS) {
-      res.setHeader('WWW-Authenticate', 'Basic realm="printershare"');
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-  } catch {
-    return res.status(401).json({ error: 'Invalid auth header' });
-  }
-
+  const payload = verifySessionToken(readSessionToken(req));
+  if (!payload) return res.status(401).json({ error: 'Authentication required' });
+  req.user = payload.sub;
   return next();
 }
 
@@ -75,6 +60,7 @@ app.use(requireApiAuth);
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/v1/health',   require('./routes/health'));
+app.use('/api/v1/auth',     require('./routes/auth'));
 app.use('/api/v1/system',   require('./routes/system'));
 app.use('/api/v1/wizard',   require('./routes/wizard'));
 app.use('/api/v1/scans',    require('./routes/scans'));

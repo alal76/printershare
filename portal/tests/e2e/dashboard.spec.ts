@@ -27,20 +27,19 @@ test.describe('Dashboard', () => {
 
   test('renders stats bar', async ({ page }) => {
     // Stats cards should be visible
-    await expect(page.getByText('Services')).toBeVisible()
-    await expect(page.getByText('Printers')).toBeVisible()
+    await expect(page.getByText('Services', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Print Queue', { exact: true }).first()).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Printers' })).toBeVisible()
   })
 
   test('renders service health grid', async ({ page }) => {
-    await expect(page.getByText('cups')).toBeVisible()
-    await expect(page.getByText('scanservjs')).toBeVisible()
+    await expect(page.locator('[data-testid="service-cups"]')).toBeVisible()
+    await expect(page.locator('[data-testid="service-scanservjs"]')).toBeVisible()
   })
 
   test('shows warning badge for degraded service', async ({ page }) => {
     // samba is 'warning' in mock
-    const sambaCard = page.locator('[data-testid="service-samba"]').or(
-      page.locator('.card').filter({ hasText: 'samba' }),
-    )
-    await expect(sambaCard.first()).toBeVisible()
+    const sambaCard = page.locator('[data-testid="service-samba"]')
+    await expect(sambaCard).toBeVisible()
   })
 })

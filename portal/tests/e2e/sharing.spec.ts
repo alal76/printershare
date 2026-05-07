@@ -6,24 +6,22 @@ test.describe('Sharing page', () => {
   })
 
   test('shows Samba connection section', async ({ page }) => {
-    await expect(page.getByText(/samba|windows sharing/i)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /file sharing/i })).toBeVisible()
   })
 
   test('shows NFS section', async ({ page }) => {
-    await expect(page.getByText(/nfs/i)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /nfs export/i })).toBeVisible()
   })
 
   test('shows Network Printing section', async ({ page }) => {
-    await expect(page.getByText(/network printing|airprint|ipp/i)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /network printing/i })).toBeVisible()
   })
 
-  test('copy button copies Samba path', async ({ page, context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-    const copyBtn = page.locator('button[aria-label*="copy"], button').filter({ hasText: /copy/i }).first()
+  test('copy button triggers feedback', async ({ page }) => {
+    const copyBtn = page.locator('button[aria-label*="Copy"]').first()
     if (await copyBtn.isVisible()) {
       await copyBtn.click()
-      // Toast or button state change indicates success
-      await expect(page.locator('text=/copied|success/i').or(copyBtn)).toBeVisible()
+      await expect(page.getByText(/copied|copy failed/i).first()).toBeVisible()
     }
   })
 })

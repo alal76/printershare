@@ -158,6 +158,8 @@
             v-for="tab in tabs"
             :key="tab.id"
             type="button"
+            role="tab"
+            :aria-selected="activeTab === tab.id"
             class="px-4 py-2.5 text-xs font-medium border-b-2 whitespace-nowrap transition-colors"
             :class="activeTab === tab.id ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
             @click="activeTab = tab.id"
@@ -165,11 +167,32 @@
             {{ tab.label }}
           </button>
         </div>
-        <!-- eslint-disable-next-line vue/no-v-html -->
-        <div
-          class="p-4 text-sm text-gray-600 leading-relaxed"
-          v-html="activeInstructions"
-        ></div>
+        <div class="p-4 text-sm text-gray-600 leading-relaxed space-y-2">
+          <p class="font-semibold text-gray-800">
+            {{ activeInstructions.title }}
+          </p>
+          <p>
+            {{ activeInstructions.description }}
+          </p>
+          <ul class="list-disc pl-5 space-y-1">
+            <li
+              v-for="(step, idx) in activeInstructions.steps"
+              :key="`${activeTab}-${idx}`"
+            >
+              {{ step }}
+            </li>
+          </ul>
+          <code
+            v-if="activeInstructions.command"
+            class="block text-xs bg-gray-100 px-2 py-1 rounded break-all"
+          >{{ activeInstructions.command }}</code>
+          <p
+            v-if="activeInstructions.note"
+            class="text-xs text-gray-500"
+          >
+            {{ activeInstructions.note }}
+          </p>
+        </div>
       </Card>
     </div>
   </AppShell>
@@ -237,12 +260,56 @@ const tabs = [
 
 const host = computed(() => globalThis.location?.hostname ?? 'printershare.local')
 
-const instructions: Record<string, string> = {
-  macos:   `<strong>AirPrint</strong> — Your printer is automatically discovered. Open any document, tap <b>Print</b> — no driver needed.`,
-  windows: `<strong>IPP Everywhere</strong> — Go to <b>Settings → Bluetooth & devices → Printers & scanners → Add device</b>. Windows auto-discovers it. If not found, choose <b>Add manually</b> and enter:<br><code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">http://${host.value}:631/printers/USB-Printer</code>`,
-  android: `<strong>Mopria Print Service</strong> — Install from the Play Store, then tap Print in any app. The printer appears automatically.`,
-  linux:   `<strong>CUPS</strong> — Run:<br><code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">sudo lpadmin -p MyPrinter -E -v ipp://${host.value}:631/printers/USB-Printer -m everywhere</code><br>Then: <code class="text-xs bg-gray-100 px-1.5 py-0.5 rounded">lpoptions -d MyPrinter</code>`,
+type PlatformInstructions = {
+  title: string
+  description: string
+  steps: string[]
+  command?: string
+  note?: string
 }
 
-const activeInstructions = computed(() => instructions[activeTab.value] ?? '')
+const instructions = computed<Record<string, PlatformInstructions>>(() => ({
+  macos: {
+    title: 'AirPrint',
+    description: 'Your printer is automatically discovered.',
+    steps: [
+      'Open any document and choose Print.',
+      'Select the PrinterShare printer from the list.',
+      'Confirm options and print.',
+    ],
+  },
+  windows: {
+    title: 'IPP Everywhere',
+    description: 'Windows can discover the printer automatically on most networks.',
+    steps: [
+      'Go to Settings -> Bluetooth & devices -> Printers & scanners -> Add device.',
+      'If not found, choose Add manually.',
+      'Use the printer URL below when prompted.',
+    ],
+    command: `http://${host.value}:631/printers/USB-Printer`,
+  },
+  android: {
+    title: 'Mopria Print Service',
+    description: 'Install Mopria once, then print from any app.',
+    steps: [
+      'Install Mopria Print Service from the Play Store.',
+      'Open a document or image and choose Print.',
+      'Select the discovered printer and print.',
+    ],
+  },
+  linux: {
+    title: 'CUPS',
+    description: 'Register the printer with lpadmin and set it as default.',
+    steps: [
+      'Run the command below to add the printer.',
+      'Set the printer as default with lpoptions.',
+    ],
+    command: `sudo lpadmin -p MyPrinter -E -v ipp://${host.value}:631/printers/USB-Printer -m everywhere`,
+    note: 'Then run: lpoptions -d MyPrinter',
+  },
+}))
+
+const activeInstructions = computed<PlatformInstructions>(() => {
+  return instructions.value[activeTab.value] ?? instructions.value.macos
+})
 </script>

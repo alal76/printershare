@@ -36,6 +36,6 @@ test.describe('Print page', () => {
       page.getByText('Windows'),
     ).first()
     await windowsTab.click()
-    await expect(page.getByText(/ipp everywhere|settings.*printers/i)).toBeVisible()
+    await expect(page.getByText('IPP Everywhere', { exact: true })).toBeVisible()
   })
 })

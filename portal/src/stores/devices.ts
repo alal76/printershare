@@ -70,11 +70,7 @@ export const useDevicesStore = defineStore('devices', () => {
     printers.value = printers.value.filter(p => p.name !== name)
   }
 
-  async function testPrint(name: string): Promise<string> {
-    return testPrintDevice(name)
-  }
-
-  return { usb, printers, loading, error, fetchDevices, addPrinter, removePrinter, testPrint }
+  return { usb, printers, loading, error, fetchDevices, addPrinter, removePrinter, testPrint: testPrintDevice }
 })
 
 /**

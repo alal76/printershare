@@ -19,8 +19,8 @@ test.describe('Devices page', () => {
   })
 
   test('shows CUPS printer card', async ({ page }) => {
-    await expect(page.getByText('HP-LaserJet')).toBeVisible()
-    await expect(page.getByText('idle')).toBeVisible()
+    await expect(page.getByText('HP-LaserJet', { exact: true })).toBeVisible()
+    await expect(page.getByText('idle', { exact: true })).toBeVisible()
   })
 
   test('shows USB device cards', async ({ page }) => {
@@ -29,13 +29,15 @@ test.describe('Devices page', () => {
   })
 
   test('shows correct capability badges', async ({ page }) => {
-    // HP should show Print badge
-    const hpCard = page.locator('.card').filter({ hasText: 'HP LaserJet Pro M404n' })
-    await expect(hpCard.getByText('Print')).toBeVisible()
+    const hpCard = page.locator('div.flex.items-center.gap-4.p-4').filter({
+      has: page.getByText('HP LaserJet Pro M404n', { exact: true }),
+    }).first()
+    await expect(hpCard.locator('span.badge-blue', { hasText: 'Print' })).toBeVisible()
 
-    // Epson should show Scan badge
-    const epsonCard = page.locator('.card').filter({ hasText: 'Epson Perfection V39' })
-    await expect(epsonCard.getByText('Scan')).toBeVisible()
+    const epsonCard = page.locator('div.flex.items-center.gap-4.p-4').filter({
+      has: page.getByText('Epson Perfection V39', { exact: true }),
+    }).first()
+    await expect(epsonCard.locator('span.badge-green', { hasText: 'Scan' })).toBeVisible()
   })
 
   test('opens Add Printer modal', async ({ page }) => {

@@ -11,9 +11,10 @@
           @click="$emit('update:modelValue', false)"
         ></div>
         <!-- Panel -->
-        <div
+        <dialog
           class="relative bg-white rounded-2xl shadow-xl max-w-lg w-full"
           :class="[$attrs.class]"
+          open
         >
           <div class="flex items-start justify-between p-5 border-b border-gray-100">
             <slot name="header">
@@ -38,7 +39,7 @@
           >
             <slot name="footer"></slot>
           </div>
-        </div>
+        </dialog>
       </div>
     </Transition>
   </Teleport>

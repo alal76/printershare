@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -10,6 +11,11 @@ const routes: RouteRecordRaw[] = [
     path: '/wizard',
     component: () => import('@/views/WizardView.vue'),
     meta: { plain: true },
+  },
+  {
+    path: '/login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { plain: true, public: true },
   },
   {
     path: '/dashboard',
@@ -55,4 +61,25 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  if (!auth.initialized) {
+    await auth.refresh()
+  }
+
+  if (!auth.authEnabled) {
+    if (to.path === '/login') return '/dashboard'
+    return true
+  }
+
+  const isPublic = Boolean(to.meta.public)
+  if (!auth.authenticated && !isPublic) {
+    return { path: '/login', query: { next: to.fullPath } }
+  }
+  if (auth.authenticated && to.path === '/login') {
+    return '/dashboard'
+  }
+  return true
 })

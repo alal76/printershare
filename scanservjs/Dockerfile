@@ -1,4 +1,4 @@
-FROM sbs20/scanservjs:latest
+FROM sbs20/scanservjs@sha256:e42263444a8dd5d533ead7d9eb2ef5fd9ca7a4a80569a6f9c14b7a3c21b9c7ca
 
 LABEL description="Scanservjs web scanner UI with AirScan/eSCL support and rclone cloud upload"
 

@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<{
   showValue?:     boolean
   indeterminate?: boolean
   color?:         'primary' | 'green' | 'yellow' | 'red'
-}>(), { value: 0, showValue: false, indeterminate: false, color: 'primary' })
+}>(), { value: 0, label: '', showValue: false, indeterminate: false, color: 'primary' })
 
 const colorClass = computed(() => ({
   primary: 'bg-primary-600',

@@ -65,6 +65,8 @@ services:
       SCANS_PATH:          /scans
       PORTAL_AUTH:         ${PORTAL_AUTH:-false}
       PORTAL_SECRET:       ${PORTAL_SECRET:-changeme-portal-secret}
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
@@ -136,6 +138,8 @@ services:
     environment:
       RCLONE_GDRIVE_REMOTE:   ${RCLONE_GDRIVE_REMOTE:-gdrive}
       RCLONE_ONEDRIVE_REMOTE: ${RCLONE_ONEDRIVE_REMOTE:-onedrive}
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
 
   # ── Samba ──────────────────────────────────────────────────────
@@ -154,6 +158,8 @@ services:
       -s "Scans;/scans;yes;no;yes;all;;;Scanned documents"
       -u "${SAMBA_USER:-scanner};${SAMBA_PASS:-changeme}"
       -p
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
 
   # ── NFS ────────────────────────────────────────────────────────
@@ -194,6 +200,8 @@ services:
       - ./nginx/tls:/etc/nginx/tls:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     depends_on:
       - portal
@@ -233,6 +241,8 @@ services:
     depends_on:
       - paperless-db
       - paperless-redis
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
 
   paperless-db:
@@ -249,6 +259,8 @@ services:
       POSTGRES_DB:       paperless
       POSTGRES_USER:     paperless
       POSTGRES_PASSWORD: ${PAPERLESS_DB_PASS:-changeme-paperless}
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
 
   paperless-redis:
@@ -261,6 +273,8 @@ services:
       - ps-network
     volumes:
       - paperless-redis:/data
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
 
   # ── Tailscale VPN (profile: remote) ───────────────────────────
@@ -297,6 +311,8 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
 
 volumes:

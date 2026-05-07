@@ -3,6 +3,7 @@
 const router   = require('express').Router();
 const { execSync } = require('node:child_process');
 const os       = require('node:os');
+const { version: packageVersion } = require('../../package.json');
 
 // GET /api/v1/system/info
 router.get('/info', (_req, res) => {
@@ -26,7 +27,7 @@ router.get('/info', (_req, res) => {
     platform: os.platform(),
     arch:     os.arch(),
     uptime:   os.uptime(),
-    version:  process.env.npm_package_version || '1.0.0',
+    version:  process.env.npm_package_version || packageVersion,
   });
 });
 

@@ -36,11 +36,14 @@ cd portal
 NEW_VERSION="$(npm version "${BUMP_TYPE}" --no-git-tag-version | tr -d 'v')"
 cd "${REPO_ROOT}"
 
+# Keep repository-wide version file in sync.
+echo "${NEW_VERSION}" > VERSION
+
 TAG="v${NEW_VERSION}"
 echo "==> New version: ${TAG}"
 
 # ── Commit + tag ─────────────────────────────────────────────────
-git add portal/package.json
+git add portal/package.json portal/package-lock.json VERSION
 git commit -m "chore: release ${TAG}"
 git tag -a "${TAG}" -m "Release ${TAG}"
 
