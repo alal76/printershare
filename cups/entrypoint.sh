@@ -24,8 +24,9 @@ if command -v avahi-daemon &>/dev/null; then
     avahi-daemon --no-chroot --daemonize 2>/dev/null || true
 fi
 
-# ── Start CUPS in background, wait, then register printers ─────────
-/usr/sbin/cupsd
+# ── Start CUPS in background, wait for it, then register printers ──
+/usr/sbin/cupsd -f &
+CUPS_PID=$!
 
 # Wait for CUPS to be ready
 for i in $(seq 1 30); do
@@ -66,5 +67,5 @@ register_ipp_everywhere
 echo "CUPS admin : ${CUPSADMIN}"
 echo "CUPS UI    : http://0.0.0.0:631"
 
-# Re-exec CUPS in foreground
-exec /usr/sbin/cupsd -f
+# Keep container alive
+wait $CUPS_PID

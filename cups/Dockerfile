@@ -6,10 +6,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cups cups-bsd cups-filters cups-pdf cups-ipp-utils \
-    foomatic-db foomatic-db-compressed-ppds foomatic-db-engine \
+    foomatic-db-compressed-ppds foomatic-db-engine \
     printer-driver-gutenprint hplip \
     avahi-daemon avahi-utils dbus libnss-mdns \
-    ippusbxd \
     ca-certificates curl wget \
     && rm -rf /var/lib/apt/lists/*
 

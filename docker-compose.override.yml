@@ -1,0 +1,23 @@
+# docker-compose.override.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# Local macOS testing overrides.
+# Docker Desktop does not support network_mode: host in the same way as Linux,
+# so CUPS and ipp-usb are moved onto the shared bridge network so the portal
+# container can reach them.  USB device mounts are also disabled since macOS
+# does not expose /dev/bus/usb.
+#
+# This file is picked up automatically by `docker compose up`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  cups:
+    network_mode: ""          # remove host networking
+    networks:
+      - ps-network
+    ports:
+      - "631:631"
+    devices: []               # no USB bus on macOS Docker
+    volumes:
+      - cups-config:/etc/cups
+      - cups-ppd:/usr/share/cups/model
+      # remove /var/run/dbus bind-mount (doesn't exist on macOS host)

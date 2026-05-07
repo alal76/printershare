@@ -1,4 +1,4 @@
-FROM sbs20/scanservjs:release
+FROM sbs20/scanservjs:latest
 
 LABEL description="Scanservjs web scanner UI with AirScan/eSCL support and rclone cloud upload"
 

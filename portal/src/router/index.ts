@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import { useSystemStore } from '@/stores/system'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -56,15 +55,4 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
-})
-
-// Navigation guard: if wizard not completed, send to /wizard
-router.beforeEach(async (to) => {
-  if (to.meta.plain || to.path === '/wizard') return true
-  try {
-    const sys = useSystemStore()
-    await sys.ensureWizardChecked()
-    if (!sys.wizardCompleted) return '/wizard'
-  } catch { /* allow navigation on error */ }
-  return true
 })

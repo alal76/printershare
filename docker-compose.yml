@@ -67,7 +67,7 @@ services:
       PORTAL_SECRET:       ${PORTAL_SECRET:-changeme-portal-secret}
     logging: *default-logging
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       start_period: 15s
@@ -85,7 +85,6 @@ services:
       - NET_ADMIN
       - SYS_ADMIN
     volumes:
-      - /var/run/dbus:/var/run/dbus
       - cups-config:/etc/cups
       - cups-ppd:/usr/share/cups/model
     devices:
