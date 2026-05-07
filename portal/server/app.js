@@ -33,6 +33,46 @@ app.use(express.urlencoded({ extended: false }));
 // Remove the X-Powered-By header to reduce information disclosure.
 app.disable('x-powered-by');
 
+// Optional API auth gate.
+// Enable by setting PORTAL_AUTH=true and provide credentials via:
+//   PORTAL_USER (default: admin)
+//   PORTAL_PASS (default: PORTAL_SECRET)
+const AUTH_ENABLED = String(process.env.PORTAL_AUTH || 'false').toLowerCase() === 'true';
+const AUTH_USER = process.env.PORTAL_USER || 'admin';
+const AUTH_PASS = process.env.PORTAL_PASS || process.env.PORTAL_SECRET || '';
+
+function requireApiAuth(req, res, next) {
+  if (!AUTH_ENABLED) return next();
+
+  // Keep health probes unauthenticated.
+  if (req.path === '/health' || req.path === '/api/v1/health' || req.path.startsWith('/api/v1/health/')) {
+    return next();
+  }
+
+  const raw = req.headers.authorization || '';
+  if (!raw.startsWith('Basic ')) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="printershare"');
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  try {
+    const decoded = Buffer.from(raw.slice(6), 'base64').toString('utf8');
+    const idx = decoded.indexOf(':');
+    const user = idx >= 0 ? decoded.slice(0, idx) : decoded;
+    const pass = idx >= 0 ? decoded.slice(idx + 1) : '';
+    if (user !== AUTH_USER || pass !== AUTH_PASS) {
+      res.setHeader('WWW-Authenticate', 'Basic realm="printershare"');
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+  } catch {
+    return res.status(401).json({ error: 'Invalid auth header' });
+  }
+
+  return next();
+}
+
+app.use(requireApiAuth);
+
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/v1/health',   require('./routes/health'));
 app.use('/api/v1/system',   require('./routes/system'));

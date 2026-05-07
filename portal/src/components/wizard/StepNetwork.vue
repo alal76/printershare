@@ -4,7 +4,7 @@
       Network Options
     </h3>
     <p class="text-sm text-gray-500">
-      Configure HTTPS port and Samba subnet (optional).
+      Configure HTTPS port and NFS subnet (optional).
     </p>
     <div class="space-y-3">
       <div>
@@ -26,7 +26,7 @@
         <label
           for="samba-subnet"
           class="block text-xs font-medium text-gray-700 mb-1"
-        >Samba Allowed Subnet (CIDR)</label>
+        >NFS Allowed Subnet (CIDR)</label>
         <input
           id="samba-subnet"
           v-model="sambaSubnet"

@@ -152,16 +152,16 @@ const restarting = ref<string | null>(null)
 interface Field { key: string; label: string; placeholder?: string; secret?: boolean; hint?: string }
 
 const networkFields: Field[] = [
-  { key: 'HTTPS_PORT',  label: 'HTTPS Port',   placeholder: '443' },
+  { key: 'NGINX_HTTP_PORT',  label: 'HTTP Port',    placeholder: '80' },
+  { key: 'NGINX_HTTPS_PORT', label: 'HTTPS Port',   placeholder: '443' },
   { key: 'CUPS_HOST',   label: 'CUPS Host',    placeholder: 'cups' },
   { key: 'CUPS_PORT',   label: 'CUPS Port',    placeholder: '631' },
-  { key: 'PORTAL_PORT', label: 'Portal Port',  placeholder: '3000' },
 ]
 
 const sharingFields: Field[] = [
   { key: 'SAMBA_WORKGROUP', label: 'Samba Workgroup',  placeholder: 'WORKGROUP' },
   { key: 'SAMBA_SHARE',     label: 'Share Name',       placeholder: 'scans' },
-  { key: 'NFS_NETWORK',     label: 'NFS Allowed Network', placeholder: '192.168.1.0/24', hint: 'CIDR of hosts allowed to mount via NFS' },
+  { key: 'NFS_ALLOWED_SUBNET', label: 'NFS Allowed Network', placeholder: '192.168.1.0/24', hint: 'CIDR of hosts allowed to mount via NFS' },
 ]
 
 const securityFields: Field[] = [

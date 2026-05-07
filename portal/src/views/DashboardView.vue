@@ -1,5 +1,26 @@
 <template>
   <AppShell title="Dashboard">
+    <Card
+      v-if="system.wizardCompleted === false"
+      class="mb-6"
+    >
+      <div class="flex items-start gap-3">
+        <AlertCircleIcon class="w-5 h-5 text-amber-500 mt-0.5" />
+        <div class="flex-1">
+          <p class="text-sm font-semibold text-gray-900">Initial setup not completed</p>
+          <p class="text-sm text-gray-500 mt-1">
+            You can use the dashboard immediately, then run the setup wizard when ready.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          @click="$router.push('/wizard')"
+        >
+          Run Wizard
+        </Button>
+      </div>
+    </Card>
+
     <!-- ── Status bar ───────────────────────────────────────────────────── -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
       <div
@@ -81,6 +102,13 @@
         Quick Actions
       </h2>
       <div class="flex flex-wrap gap-3">
+        <Button
+          variant="secondary"
+          @click="$router.push('/wizard')"
+        >
+          <Settings2Icon class="w-4 h-4" />
+          Run Setup Wizard
+        </Button>
         <Button @click="$router.push('/scan')">
           <ScanIcon class="w-4 h-4" />
           New Scan
@@ -109,6 +137,111 @@
       </div>
     </section>
 
+    <!-- ── System metrics ───────────────────────────────────────────────── -->
+    <section class="mb-6 grid md:grid-cols-2 gap-3">
+      <Card>
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          System Metrics
+        </h2>
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between gap-3">
+            <span class="text-gray-500">Host</span>
+            <span class="font-medium text-gray-900 truncate">{{ systemInfo.hostname || 'Unknown' }}</span>
+          </div>
+          <div class="flex justify-between gap-3">
+            <span class="text-gray-500">IP</span>
+            <span class="font-medium text-gray-900">{{ systemInfo.ip || 'Unknown' }}</span>
+          </div>
+          <div class="flex justify-between gap-3">
+            <span class="text-gray-500">Platform</span>
+            <span class="font-medium text-gray-900">{{ systemInfo.platform || 'Unknown' }}</span>
+          </div>
+          <div class="flex justify-between gap-3">
+            <span class="text-gray-500">Uptime</span>
+            <span class="font-medium text-gray-900">{{ uptimeLabel }}</span>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          Key Settings
+        </h2>
+        <div class="space-y-2 text-sm">
+          <div
+            v-for="entry in keySettings"
+            :key="entry.key"
+            class="flex justify-between gap-3"
+          >
+            <span class="text-gray-500">{{ entry.label }}</span>
+            <span class="font-medium text-gray-900 truncate">{{ entry.value }}</span>
+          </div>
+        </div>
+      </Card>
+    </section>
+
+    <!-- ── Device inventory ─────────────────────────────────────────────── -->
+    <section class="mb-6 grid lg:grid-cols-2 gap-3">
+      <Card>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Printers
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="$router.push('/devices')"
+          >
+            Manage
+          </Button>
+        </div>
+        <div
+          v-if="devices.printers.length === 0"
+          class="text-sm text-gray-500"
+        >
+          No printers detected.
+        </div>
+        <div
+          v-else
+          class="space-y-2"
+        >
+          <div
+            v-for="printer in devices.printers"
+            :key="printer.name"
+            class="p-2 rounded-xl border border-gray-100"
+          >
+            <p class="text-sm font-medium text-gray-900 truncate">{{ printer.name }}</p>
+            <p class="text-xs text-gray-500 truncate">{{ printer.uri }}</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          Scanners / USB Devices
+        </h2>
+        <div
+          v-if="devices.usb.length === 0"
+          class="text-sm text-gray-500"
+        >
+          No USB scanner/printer devices detected.
+        </div>
+        <div
+          v-else
+          class="space-y-2"
+        >
+          <div
+            v-for="usb in devices.usb"
+            :key="usb.vidpid"
+            class="p-2 rounded-xl border border-gray-100"
+          >
+            <p class="text-sm font-medium text-gray-900 truncate">{{ usb.name }}</p>
+            <p class="text-xs text-gray-500">{{ usb.vidpid }}</p>
+          </div>
+        </div>
+      </Card>
+    </section>
+
     <!-- ── Recent scans ──────────────────────────────────────────────────── -->
     <section>
       <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
@@ -124,25 +257,67 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import {
   ScanIcon, PrinterIcon, UsbIcon, ShareIcon,
   CheckCircleIcon, AlertCircleIcon, PrinterIcon as PrintIcon,
-  FileTextIcon, DatabaseIcon, WifiIcon, ShieldIcon,
+  FileTextIcon, DatabaseIcon, WifiIcon, ShieldIcon, Settings2Icon,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import AppShell   from '@/components/layout/AppShell.vue'
 import Button     from '@/components/ui/Button.vue'
+import Card       from '@/components/ui/Card.vue'
 import FileList   from '@/components/scan/FileList.vue'
 import { useSystemStore } from '@/stores/system'
 import { useScanStore }   from '@/stores/scan'
 import { usePrintStore }  from '@/stores/print'
+import { useDevicesStore } from '@/stores/devices'
 
 const system = useSystemStore()
 const scan   = useScanStore()
 const print  = usePrintStore()
+const devices = useDevicesStore()
+
+const systemInfo = computed(() => {
+  const raw = system.info
+  return {
+    hostname: raw?.hostname ?? '',
+    ip: raw?.ip ?? '',
+    platform: raw?.platform && raw?.arch ? `${raw.platform}/${raw.arch}` : '',
+    uptime: raw?.uptime ?? 0,
+  }
+})
 
 onMounted(async () => {
   system.startPolling()
-  await Promise.all([scan.fetchFiles(), print.fetchQueue()])
+  await Promise.all([
+    system.ensureWizardChecked(),
+    system.fetchInfo(),
+    system.fetchSettingsSnapshot(),
+    scan.fetchFiles(),
+    print.fetchQueue(),
+    devices.fetchDevices(),
+  ])
 })
 onUnmounted(() => system.stopPolling())
+
+const uptimeLabel = computed(() => {
+  const secs = Number(systemInfo.value.uptime || 0)
+  if (!secs) return 'Unknown'
+  const days = Math.floor(secs / 86400)
+  const hours = Math.floor((secs % 86400) / 3600)
+  const mins = Math.floor((secs % 3600) / 60)
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${mins}m`
+  return `${mins}m`
+})
+
+const keySettings = computed(() => {
+  const s = system.settingsSnapshot
+  return [
+    { key: 'NGINX_HTTP_PORT', label: 'HTTP Port', value: s?.NGINX_HTTP_PORT ?? '80' },
+    { key: 'NGINX_HTTPS_PORT', label: 'HTTPS Port', value: s?.NGINX_HTTPS_PORT ?? '443' },
+    { key: 'CUPS_HOST', label: 'CUPS Host', value: s?.CUPS_HOST ?? 'host.docker.internal' },
+    { key: 'CUPS_PORT', label: 'CUPS Port', value: s?.CUPS_PORT ?? '631' },
+    { key: 'SCANS_HOST_PATH', label: 'Scans Path', value: s?.SCANS_HOST_PATH ?? '/srv/printershare/scans' },
+  ]
+})
 
 const healthyCount = computed(() => {
   if (!system.health) return 0

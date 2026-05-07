@@ -137,6 +137,47 @@ async function prev() {
   currentStep.value--
 }
 
+type BuildEvent = { type?: string; data?: string }
+
+function parseSseChunk(chunk: string): BuildEvent | null {
+  const line = chunk.split('\n').find(l => l.startsWith('data: '))
+  if (!line) return null
+  return JSON.parse(line.slice(6)) as BuildEvent
+}
+
+function handleBuildEvent(evt: BuildEvent): boolean {
+  if (evt.type === 'log' && evt.data) {
+    toast.info('Build progress', evt.data)
+  }
+  if (evt.type === 'error') {
+    throw new Error(evt.data || 'Build failed')
+  }
+  return evt.type === 'complete'
+}
+
+async function consumeBuildStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<boolean> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completed = false
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const chunks = buffer.split('\n\n')
+    buffer = chunks.pop() ?? ''
+
+    for (const chunk of chunks) {
+      const evt = parseSseChunk(chunk)
+      if (!evt) continue
+      completed = handleBuildEvent(evt) || completed
+    }
+  }
+
+  return completed
+}
+
 async function finish() {
   building.value = true
   try {
@@ -146,8 +187,16 @@ async function finish() {
       body:    JSON.stringify({ config: config.value }),
     })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
+
+    const reader = r.body?.getReader()
+    if (!reader) throw new Error('No build stream received')
+
+    const completed = await consumeBuildStream(reader)
+
+    if (!completed) throw new Error('Build did not complete successfully')
+
     system.wizardCompleted = true
-    toast.success('Setup complete!', 'Services are starting up.')
+    toast.success('Setup complete!', 'Services started successfully.')
     await router.push('/dashboard')
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)

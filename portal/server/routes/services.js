@@ -1,7 +1,7 @@
 'use strict';
 
 const router = require('express').Router();
-const { execSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 
 const ALLOWED_SERVICES = new Set([
   'cups', 'ipp-usb', 'scanservjs', 'samba',
@@ -18,7 +18,13 @@ router.post('/:name/restart', (req, res) => {
     return res.status(400).json({ error: 'Unknown service' });
   }
   try {
-    execSync(`docker compose -f ${COMPOSE_FILE} restart ${name}`, { timeout: 30_000 });
+    const result = spawnSync('docker', ['compose', '-f', COMPOSE_FILE, 'restart', name], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    if (result.status !== 0) {
+      throw new Error(result.stderr || result.stdout || `Restart failed with code ${result.status}`);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message) });

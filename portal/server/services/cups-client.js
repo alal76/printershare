@@ -1,106 +1,73 @@
 'use strict';
 
-/**
- * Minimal CUPS client using the IPP HTTP API.
- * Avoids spawning `lp` to prevent command injection.
- */
+const { spawnSync } = require('node:child_process');
 
-const fs   = require('node:fs');
-const http = require('node:http');
-
-const CUPS_HOST = process.env.CUPS_HOST || 'host.docker.internal';
-const CUPS_PORT = Number.parseInt(process.env.CUPS_PORT || '631', 10);
-
-/**
- * Send a raw IPP request over HTTP.
- * @param {string} path  - CUPS HTTP path (e.g. '/printers/')
- * @param {Buffer} body  - IPP request body
- */
-function ippRequest(urlPath, body) {
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: CUPS_HOST,
-      port:     CUPS_PORT,
-      path:     urlPath,
-      method:   'POST',
-      headers: {
-        'Content-Type':   'application/ipp',
-        'Content-Length': body.length,
-      },
-    }, res => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
-    });
-    req.on('error', reject);
-    req.setTimeout(10_000, () => { req.destroy(); reject(new Error('CUPS request timed out')); });
-    req.write(body);
-    req.end();
+function run(command, args, timeout = 10_000) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    timeout,
   });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `${command} exited with ${result.status}`);
+  }
+  return result.stdout.trim();
 }
 
-/**
- * Build a minimal IPP Get-Printers request.
- */
-function buildGetPrintersRequest() {
-  // IPP version 2.0, operation Get-Printers (0x400A), request-id 1
-  const buf = Buffer.alloc(1024);
-  let i = 0;
-  buf[i++] = 0x02; buf[i++] = 0x00; // version 2.0
-  buf[i++] = 0x40; buf[i++] = 0x0A; // Get-Printers
-  buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x00; buf[i++] = 0x01; // req-id
-  buf[i++] = 0x01; // operation-attributes-tag
-  // charset
-  buf[i++] = 0x47; buf[i++] = 0x00; buf[i++] = 0x12;
-  buf.write('attributes-charset', i); i += 18;
-  buf[i++] = 0x00; buf[i++] = 0x05; buf.write('utf-8', i); i += 5;
-  // natural-language
-  buf[i++] = 0x48; buf[i++] = 0x00; buf[i++] = 0x1b;
-  buf.write('attributes-natural-language', i); i += 27;
-  buf[i++] = 0x00; buf[i++] = 0x05; buf.write('en-US', i); i += 5;
-  buf[i++] = 0x03; // end-of-attributes
-  return buf.slice(0, i);
+function parsePrinterState(detail) {
+  if (detail.startsWith('is idle')) return 'idle';
+  if (detail.startsWith('is busy')) return 'busy';
+  if (detail.startsWith('disabled')) return 'disabled';
+  return 'unknown';
+}
+
+function getUrisByPrinter() {
+  const out = run('lpstat', ['-v'], 5000);
+  const lines = out.split('\n');
+  const map = {};
+  for (const line of lines) {
+    const m = /^device for (\S+):\s*(\S+)$/.exec(line.trim());
+    if (!m) continue;
+    map[m[1]] = m[2];
+  }
+  return map;
 }
 
 /** List printers from CUPS. Returns array of { name, state, uri }. */
 async function listPrinters() {
   try {
-    const body = buildGetPrintersRequest();
-    const res  = await ippRequest('/printers/', body);
-    // For now return a minimal response — full IPP parsing would need a library
-    return res.status === 200 ? [{ name: 'USB-Printer', state: 'idle', uri: `ipp://${CUPS_HOST}:${CUPS_PORT}/printers/USB-Printer` }] : [];
+    const printerOut = run('lpstat', ['-p'], 5000);
+    const uris = getUrisByPrinter();
+    const printers = [];
+
+    for (const line of printerOut.split('\n')) {
+      const m = /^printer (\S+)\s+(.+)$/.exec(line.trim());
+      if (!m) continue;
+      const name = m[1];
+      printers.push({
+        name,
+        state: parsePrinterState(m[2]),
+        uri: uris[name] || '',
+      });
+    }
+    return printers;
   } catch {
     return [];
   }
 }
 
-/** Print a file by sending it as an IPP Print-Job to CUPS. */
-async function printFile(filePath, printerName, _opts = {}) {
-  const fileData = fs.readFileSync(filePath);
-  const mimeType = filePath.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
+/** Print a file by calling lp with arg-array execution. */
+async function printFile(filePath, printerName, opts = {}) {
+  const copies = Number.parseInt(String(opts.copies || '1'), 10);
+  const args = ['-d', printerName, '-n', Number.isInteger(copies) && copies > 0 ? String(copies) : '1'];
 
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: CUPS_HOST,
-      port:     CUPS_PORT,
-      path:     `/printers/${printerName}`,
-      method:   'POST',
-      headers: {
-        'Content-Type':   mimeType,
-        'Content-Length': fileData.length,
-      },
-    }, res => {
-      if (res.statusCode === 200 || res.statusCode === 201) {
-        resolve(`job-${Date.now()}`);
-      } else {
-        reject(new Error(`CUPS rejected print job: HTTP ${res.statusCode}`));
-      }
-    });
-    req.on('error', reject);
-    req.setTimeout(30_000, () => { req.destroy(); reject(new Error('Print request timed out')); });
-    req.write(fileData);
-    req.end();
-  });
+  if (opts.color === 'mono') args.push('-o', 'ColorModel=Gray');
+  if (opts.color === 'color') args.push('-o', 'ColorModel=RGB');
+
+  args.push(filePath);
+
+  const out = run('lp', args, 30_000);
+  const m = /request id is \S+-(\d+)/i.exec(out);
+  return m ? m[1] : `job-${Date.now()}`;
 }
 
 module.exports = { listPrinters, printFile };

@@ -105,10 +105,6 @@ router.post('/build', (req, res) => {
 
   sendSse(res, 'log', '==> Writing configuration...');
 
-  const state = loadState();
-  state.completed = true;
-  saveState(state);
-
   sendSse(res, 'log', '==> Starting docker compose build...');
 
   const child = spawn('docker', [
@@ -119,8 +115,14 @@ router.post('/build', (req, res) => {
   child.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
 
   child.on('close', code => {
-    sendSse(res, code === 0 ? 'complete' : 'error',
-      code === 0 ? 'Build successful' : `Build failed (exit ${code})`);
+    if (code === 0) {
+      const state = loadState();
+      state.completed = true;
+      saveState(state);
+      sendSse(res, 'complete', 'Build successful');
+    } else {
+      sendSse(res, 'error', `Build failed (exit ${code})`);
+    }
     res.end();
   });
 
