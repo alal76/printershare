@@ -1,22 +1,46 @@
 'use strict';
 
+/**
+ * @module routes/wizard
+ * @description Setup-wizard REST endpoints.
+ *
+ * GET  /api/v1/wizard/state    – Returns the persisted wizard state
+ *                                ({step, completed, config}).
+ * POST /api/v1/wizard/state    – Advances the wizard to a new step and
+ *                                merges partial config values.
+ * POST /api/v1/wizard/build    – Writes the collected config to the .env file
+ *                                then spawns `docker compose up --build -d`.
+ *                                The response is an SSE stream so the browser
+ *                                can display live build output.
+ * POST /api/v1/wizard/reset    – Clears the persisted state (re-run wizard).
+ */
+
 const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
 const { spawn } = require('node:child_process');
+/* env.js imported when wizard needs to write settings */
 
 const DATA_DIR   = process.env.PORTAL_DATA_DIR || '/app/data';
 const STATE_FILE = path.join(DATA_DIR, 'wizard-state.json');
 
+/**
+ * Load the wizard state from disk.
+ * @returns {{ step: number, completed: boolean, config: Record<string,string> }}
+ */
 function loadState() {
   try {
     if (fs.existsSync(STATE_FILE)) {
       return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     }
-  } catch { /* ignore */ }
+  } catch { /* ignore corrupt state */ }
   return { step: 0, completed: false, config: {} };
 }
 
+/**
+ * Persist the wizard state to disk.
+ * @param {{ step: number, completed: boolean, config: Record<string,string> }} state
+ */
 function saveState(state) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));

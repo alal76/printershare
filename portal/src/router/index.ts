@@ -18,6 +18,11 @@ const routes: RouteRecordRaw[] = [
     meta: { title: 'Dashboard' },
   },
   {
+    path: '/devices',
+    component: () => import('@/views/DevicesView.vue'),
+    meta: { title: 'Devices' },
+  },
+  {
     path: '/scan',
     component: () => import('@/views/ScanView.vue'),
     meta: { title: 'Scan' },
@@ -26,6 +31,11 @@ const routes: RouteRecordRaw[] = [
     path: '/print',
     component: () => import('@/views/PrintView.vue'),
     meta: { title: 'Print' },
+  },
+  {
+    path: '/sharing',
+    component: () => import('@/views/SharingView.vue'),
+    meta: { title: 'Sharing' },
   },
   {
     path: '/docs',

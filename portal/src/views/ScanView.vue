@@ -9,8 +9,14 @@
       <!-- File list -->
       <section>
         <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Scanned Files</h2>
-          <Button variant="ghost" size="sm" @click="scanStore.fetchFiles()">
+          <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+            Scanned Files
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="scanStore.fetchFiles()"
+          >
             <RefreshCwIcon class="w-3.5 h-3.5" />
           </Button>
         </div>

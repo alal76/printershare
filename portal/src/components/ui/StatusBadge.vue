@@ -1,6 +1,12 @@
 <template>
-  <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium" :class="cls">
-    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="dotCls" />
+  <span
+    class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium"
+    :class="cls"
+  >
+    <span
+      class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+      :class="dotCls"
+    ></span>
     {{ label ?? statusLabel }}
   </span>
 </template>

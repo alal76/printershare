@@ -5,10 +5,13 @@
         v-for="link in navLinks"
         :key="link.to"
         :to="link.to"
-        class="flex flex-col items-center gap-0.5 py-2 px-4 text-[11px] font-medium transition-colors"
+        class="flex flex-col items-center gap-0.5 py-2 px-3 text-[10px] font-medium transition-colors"
         :class="isActive(link.to) ? 'text-primary-600' : 'text-gray-500'"
       >
-        <component :is="link.icon" class="w-5 h-5" />
+        <component
+          :is="link.icon"
+          class="w-5 h-5"
+        />
         {{ link.label }}
       </RouterLink>
     </div>
@@ -17,15 +20,16 @@
 
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { LayoutDashboardIcon, ScanIcon, PrinterIcon, FileTextIcon } from 'lucide-vue-next'
+import { LayoutDashboardIcon, UsbIcon, ScanIcon, PrinterIcon, ShareIcon } from 'lucide-vue-next'
 
 const route = useRoute()
 
 const navLinks = [
-  { to: '/dashboard', label: 'Home',   icon: LayoutDashboardIcon },
-  { to: '/scan',      label: 'Scan',   icon: ScanIcon },
-  { to: '/print',     label: 'Print',  icon: PrinterIcon },
-  { to: '/docs',      label: 'Docs',   icon: FileTextIcon },
+  { to: '/dashboard', label: 'Home',    icon: LayoutDashboardIcon },
+  { to: '/devices',   label: 'Devices', icon: UsbIcon },
+  { to: '/scan',      label: 'Scan',    icon: ScanIcon },
+  { to: '/print',     label: 'Print',   icon: PrinterIcon },
+  { to: '/sharing',   label: 'Sharing', icon: ShareIcon },
 ]
 
 function isActive(path: string) {

@@ -1,29 +1,59 @@
 <template>
   <div>
-    <div v-if="scanStore.isLoading" class="space-y-2">
-      <div v-for="i in 3" :key="i" class="h-12 bg-gray-100 rounded-xl animate-pulse" />
+    <div
+      v-if="scanStore.isLoading"
+      class="space-y-2"
+    >
+      <div
+        v-for="i in 3"
+        :key="i"
+        class="h-12 bg-gray-100 rounded-xl animate-pulse"
+      ></div>
     </div>
-    <div v-else-if="files.length === 0" class="text-center py-10 text-gray-400 text-sm border border-dashed rounded-xl">
+    <div
+      v-else-if="files.length === 0"
+      class="text-center py-10 text-gray-400 text-sm border border-dashed rounded-xl"
+    >
       No scanned files yet
     </div>
-    <div v-else class="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden bg-white">
+    <div
+      v-else
+      class="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden bg-white"
+    >
       <div
         v-for="file in displayFiles"
         :key="file.name"
         class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
       >
         <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-          <component :is="fileIcon(file.mimeType)" class="w-4 h-4 text-primary-600" />
+          <component
+            :is="fileIcon(file.mimeType)"
+            class="w-4 h-4 text-primary-600"
+          />
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-900 truncate">{{ file.name }}</p>
-          <p class="text-xs text-gray-400">{{ formatSize(file.size) }} · {{ formatDate(file.date) }}</p>
+          <p class="text-sm font-medium text-gray-900 truncate">
+            {{ file.name }}
+          </p>
+          <p class="text-xs text-gray-400">
+            {{ formatSize(file.size) }} · {{ formatDate(file.date) }}
+          </p>
         </div>
         <div class="flex items-center gap-1">
-          <a :href="file.url" download class="p-1.5 text-gray-400 hover:text-primary-600 rounded-lg hover:bg-primary-50 transition-colors" :title="`Download ${file.name}`">
+          <a
+            :href="file.url"
+            download
+            class="p-1.5 text-gray-400 hover:text-primary-600 rounded-lg hover:bg-primary-50 transition-colors"
+            :title="`Download ${file.name}`"
+          >
             <DownloadIcon class="w-4 h-4" />
           </a>
-          <button class="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors" :title="`Delete ${file.name}`" @click="confirmDelete(file.name)">
+          <button
+            type="button"
+            class="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
+            :title="`Delete ${file.name}`"
+            @click="confirmDelete(file.name)"
+          >
             <Trash2Icon class="w-4 h-4" />
           </button>
         </div>

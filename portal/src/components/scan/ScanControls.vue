@@ -3,43 +3,104 @@
     <div class="max-w-2xl space-y-5">
       <!-- Scan form -->
       <Card>
-        <h2 class="text-sm font-semibold text-gray-900 mb-4">Scan Settings</h2>
-        <form class="space-y-3" @submit.prevent="startScan">
+        <h2 class="text-sm font-semibold text-gray-900 mb-4">
+          Scan Settings
+        </h2>
+        <form
+          class="space-y-3"
+          @submit.prevent="startScan"
+        >
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label for="scan-res" class="block text-xs font-medium text-gray-700 mb-1">Resolution</label>
-              <select id="scan-res" v-model="opts.resolution" class="w-full rounded-xl border-gray-200 text-sm">
-                <option value="150">150 dpi</option>
-                <option value="300">300 dpi</option>
-                <option value="600">600 dpi</option>
+              <label
+                for="scan-res"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >Resolution</label>
+              <select
+                id="scan-res"
+                v-model="opts.resolution"
+                class="w-full rounded-xl border-gray-200 text-sm"
+              >
+                <option value="150">
+                  150 dpi
+                </option>
+                <option value="300">
+                  300 dpi
+                </option>
+                <option value="600">
+                  600 dpi
+                </option>
               </select>
             </div>
             <div>
-              <label for="scan-color" class="block text-xs font-medium text-gray-700 mb-1">Mode</label>
-              <select id="scan-color" v-model="opts.color" class="w-full rounded-xl border-gray-200 text-sm">
-                <option value="color">Color</option>
-                <option value="gray">Grayscale</option>
-                <option value="lineart">Black & White</option>
+              <label
+                for="scan-color"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >Mode</label>
+              <select
+                id="scan-color"
+                v-model="opts.color"
+                class="w-full rounded-xl border-gray-200 text-sm"
+              >
+                <option value="color">
+                  Color
+                </option>
+                <option value="gray">
+                  Grayscale
+                </option>
+                <option value="lineart">
+                  Black & White
+                </option>
               </select>
             </div>
             <div>
-              <label for="scan-format" class="block text-xs font-medium text-gray-700 mb-1">Format</label>
-              <select id="scan-format" v-model="opts.format" class="w-full rounded-xl border-gray-200 text-sm">
-                <option value="pdf">PDF</option>
-                <option value="jpg">JPEG</option>
-                <option value="png">PNG</option>
-                <option value="tiff">TIFF</option>
+              <label
+                for="scan-format"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >Format</label>
+              <select
+                id="scan-format"
+                v-model="opts.format"
+                class="w-full rounded-xl border-gray-200 text-sm"
+              >
+                <option value="pdf">
+                  PDF
+                </option>
+                <option value="jpg">
+                  JPEG
+                </option>
+                <option value="png">
+                  PNG
+                </option>
+                <option value="tiff">
+                  TIFF
+                </option>
               </select>
             </div>
             <div>
-              <label for="scan-source" class="block text-xs font-medium text-gray-700 mb-1">Source</label>
-              <select id="scan-source" v-model="opts.source" class="w-full rounded-xl border-gray-200 text-sm">
-                <option value="flatbed">Flatbed</option>
-                <option value="adf">Auto Feed (ADF)</option>
+              <label
+                for="scan-source"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >Source</label>
+              <select
+                id="scan-source"
+                v-model="opts.source"
+                class="w-full rounded-xl border-gray-200 text-sm"
+              >
+                <option value="flatbed">
+                  Flatbed
+                </option>
+                <option value="adf">
+                  Auto Feed (ADF)
+                </option>
               </select>
             </div>
           </div>
-          <Button type="submit" class="w-full" :loading="scanning">
+          <Button
+            type="submit"
+            class="w-full"
+            :loading="scanning"
+          >
             <ScanIcon class="w-4 h-4" />
             {{ scanning ? 'Scanning…' : 'Start Scan' }}
           </Button>

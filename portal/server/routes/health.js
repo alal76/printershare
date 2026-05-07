@@ -1,7 +1,6 @@
 'use strict';
 
 const router = require('express').Router();
-const http   = require('node:http');
 const { execSync } = require('node:child_process');
 
 const CUPS_HOST           = process.env.CUPS_HOST           || 'host.docker.internal';

@@ -3,14 +3,11 @@
 const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
-const multer = require('multer');
 const mime   = require('mime-types');
 
 const SCANS_PATH  = process.env.SCANS_PATH || '/scans';
-const MAX_PREVIEW = 100; // max files to list
 
-// Multer: memory storage (files are read-only from container)
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const MAX_PREVIEW = 100; // max files to list
 
 /** Safe basename — strip any path traversal */
 function safeName(name) {

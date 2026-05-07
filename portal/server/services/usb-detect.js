@@ -7,11 +7,6 @@
 
 const KNOWN_DEVICES = require('../data/usb-devices.json');
 
-// USB device classes relevant to printing/scanning
-const PRINTER_CLASS = '07';
-const IMAGING_CLASS = '06';
-const VENDOR_CLASS  = 'ff';
-
 function parseUsbDevices(lsusbOutput) {
   const devices = [];
   for (const line of lsusbOutput.split('\n')) {

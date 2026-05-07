@@ -1,19 +1,38 @@
 <template>
   <Teleport to="body">
     <div class="fixed top-4 right-4 z-50 flex flex-col gap-2 w-80 pointer-events-none">
-      <TransitionGroup name="toast" tag="div" class="flex flex-col gap-2">
+      <TransitionGroup
+        name="toast"
+        tag="div"
+        class="flex flex-col gap-2"
+      >
         <div
           v-for="toast in toasts"
           :key="toast.id"
           class="pointer-events-auto rounded-xl shadow-lg border p-4 bg-white flex items-start gap-3"
           :class="borderClass(toast.kind)"
         >
-          <component :is="iconFor(toast.kind)" class="w-4 h-4 mt-0.5 flex-shrink-0" :class="iconColorClass(toast.kind)" />
+          <component
+            :is="iconFor(toast.kind)"
+            class="w-4 h-4 mt-0.5 flex-shrink-0"
+            :class="iconColorClass(toast.kind)"
+          />
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-gray-900">{{ toast.title }}</p>
-            <p v-if="toast.message" class="text-xs text-gray-500 mt-0.5">{{ toast.message }}</p>
+            <p class="text-sm font-medium text-gray-900">
+              {{ toast.title }}
+            </p>
+            <p
+              v-if="toast.message"
+              class="text-xs text-gray-500 mt-0.5"
+            >
+              {{ toast.message }}
+            </p>
           </div>
-          <button class="text-gray-400 hover:text-gray-600" @click="store.remove(toast.id)">
+          <button
+            type="button"
+            class="text-gray-400 hover:text-gray-600"
+            @click="store.remove(toast.id)"
+          >
             <XIcon class="w-4 h-4" />
           </button>
         </div>

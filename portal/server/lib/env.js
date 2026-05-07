@@ -88,7 +88,7 @@ function writeEnvPatch(patch, filePath = DOTENV_PATH) {
   for (const [rawKey, rawVal] of Object.entries(patch)) {
     if (typeof rawVal !== 'string' && typeof rawVal !== 'number') continue;
 
-    const safeKey = rawKey.replaceAll(/[^A-Za-z0-9_]/g, '_');
+    const safeKey = rawKey.replaceAll(/\W/g, '_');
     const safeVal = String(rawVal).replaceAll(/[\r\n]/g, '');
     const line    = `${safeKey}=${safeVal}`;
 

@@ -6,7 +6,6 @@
  */
 
 const fs   = require('node:fs');
-const path = require('node:path');
 const http = require('node:http');
 
 const CUPS_HOST = process.env.CUPS_HOST || 'host.docker.internal';
@@ -76,7 +75,7 @@ async function listPrinters() {
 }
 
 /** Print a file by sending it as an IPP Print-Job to CUPS. */
-async function printFile(filePath, printerName, opts = {}) {
+async function printFile(filePath, printerName, _opts = {}) {
   const fileData = fs.readFileSync(filePath);
   const mimeType = filePath.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg';
 

@@ -11,34 +11,62 @@
         </div>
         <!-- Step dots -->
         <div class="flex items-center gap-2">
-          <template v-for="(s, i) in steps" :key="i">
+          <template
+            v-for="(_, i) in steps"
+            :key="i"
+          >
             <div
               class="flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold transition-all"
               :class="stepDotClass(i)"
             >
-              <CheckIcon v-if="i < currentStep" class="w-3.5 h-3.5" />
+              <CheckIcon
+                v-if="i < currentStep"
+                class="w-3.5 h-3.5"
+              />
               <span v-else>{{ i + 1 }}</span>
             </div>
-            <div v-if="i < steps.length - 1" class="flex-1 h-0.5 rounded" :class="i < currentStep ? 'bg-white' : 'bg-white/30'" />
+            <div
+              v-if="i < steps.length - 1"
+              class="flex-1 h-0.5 rounded"
+              :class="i < currentStep ? 'bg-white' : 'bg-white/30'"
+            ></div>
           </template>
         </div>
-        <p class="text-white/80 text-sm mt-3">Step {{ currentStep + 1 }} of {{ steps.length }}: {{ steps[currentStep] }}</p>
+        <p class="text-white/80 text-sm mt-3">
+          Step {{ currentStep + 1 }} of {{ steps.length }}: {{ steps[currentStep] }}
+        </p>
       </div>
 
       <!-- Step content -->
       <div class="p-6">
-        <component :is="stepComponents[currentStep]" v-model:config="config" @valid="isValid = $event" />
+        <component
+          :is="stepComponents[currentStep]"
+          v-model:config="config"
+          @valid="isValid = $event"
+        />
       </div>
 
       <!-- Footer nav -->
       <div class="px-6 pb-6 flex items-center justify-between">
-        <Button variant="ghost" :disabled="currentStep === 0" @click="prev">
+        <Button
+          variant="ghost"
+          :disabled="currentStep === 0"
+          @click="prev"
+        >
           <ChevronLeftIcon class="w-4 h-4" /> Back
         </Button>
-        <Button v-if="currentStep < steps.length - 1" @click="next" :disabled="!isValid">
+        <Button
+          v-if="currentStep < steps.length - 1"
+          :disabled="!isValid"
+          @click="next"
+        >
           Next <ChevronRightIcon class="w-4 h-4" />
         </Button>
-        <Button v-else @click="finish" :loading="building">
+        <Button
+          v-else
+          :loading="building"
+          @click="finish"
+        >
           <RocketIcon class="w-4 h-4" /> Launch
         </Button>
       </div>

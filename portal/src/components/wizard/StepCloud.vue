@@ -1,24 +1,57 @@
 <template>
   <div class="space-y-4">
-    <h3 class="font-semibold text-gray-900">Cloud Backup (Optional)</h3>
-    <p class="text-sm text-gray-500">Enable automatic scan backup to Dropbox, Google Drive, or S3.</p>
+    <h3 class="font-semibold text-gray-900">
+      Cloud Backup (Optional)
+    </h3>
+    <p class="text-sm text-gray-500">
+      Enable automatic scan backup to Dropbox, Google Drive, or S3.
+    </p>
 
     <div class="flex items-center gap-3">
-      <input id="cloud-enable" v-model="enabled" type="checkbox" class="rounded border-gray-300 text-primary-600" @change="update" />
-      <label for="cloud-enable" class="text-sm text-gray-700">Enable cloud backup</label>
+      <input
+        id="cloud-enable"
+        v-model="enabled"
+        type="checkbox"
+        class="rounded border-gray-300 text-primary-600"
+        @change="update"
+      />
+      <label
+        for="cloud-enable"
+        class="text-sm text-gray-700"
+      >Enable cloud backup</label>
     </div>
 
-    <div v-if="enabled" class="space-y-3">
+    <div
+      v-if="enabled"
+      class="space-y-3"
+    >
       <div>
-        <label for="cloud-type" class="block text-xs font-medium text-gray-700 mb-1">Provider</label>
-        <select id="cloud-type" v-model="provider" class="w-full rounded-xl border-gray-200 text-sm" @change="update">
-          <option value="dropbox">Dropbox</option>
-          <option value="gdrive">Google Drive</option>
-          <option value="s3">Amazon S3</option>
+        <label
+          for="cloud-type"
+          class="block text-xs font-medium text-gray-700 mb-1"
+        >Provider</label>
+        <select
+          id="cloud-type"
+          v-model="provider"
+          class="w-full rounded-xl border-gray-200 text-sm"
+          @change="update"
+        >
+          <option value="dropbox">
+            Dropbox
+          </option>
+          <option value="gdrive">
+            Google Drive
+          </option>
+          <option value="s3">
+            Amazon S3
+          </option>
         </select>
       </div>
       <div>
-        <label for="cloud-bucket" class="block text-xs font-medium text-gray-700 mb-1">Bucket / Remote Path</label>
+        <label
+          for="cloud-bucket"
+          class="block text-xs font-medium text-gray-700 mb-1"
+        >Bucket / Remote Path</label>
         <input
           id="cloud-bucket"
           v-model="bucket"

@@ -1,15 +1,31 @@
 <template>
   <div class="space-y-4">
-    <h3 class="font-semibold text-gray-900">Remote Access (Optional)</h3>
-    <p class="text-sm text-gray-500">Access your printer from outside your home network.</p>
+    <h3 class="font-semibold text-gray-900">
+      Remote Access (Optional)
+    </h3>
+    <p class="text-sm text-gray-500">
+      Access your printer from outside your home network.
+    </p>
 
     <div class="space-y-3">
       <div class="flex items-center gap-3">
-        <input id="ts-enable" v-model="tailscale" type="checkbox" class="rounded border-gray-300 text-primary-600" @change="update" />
-        <label for="ts-enable" class="text-sm text-gray-700">Enable Tailscale VPN</label>
+        <input
+          id="ts-enable"
+          v-model="tailscale"
+          type="checkbox"
+          class="rounded border-gray-300 text-primary-600"
+          @change="update"
+        />
+        <label
+          for="ts-enable"
+          class="text-sm text-gray-700"
+        >Enable Tailscale VPN</label>
       </div>
       <div v-if="tailscale">
-        <label for="ts-key" class="block text-xs font-medium text-gray-700 mb-1">Tailscale Auth Key</label>
+        <label
+          for="ts-key"
+          class="block text-xs font-medium text-gray-700 mb-1"
+        >Tailscale Auth Key</label>
         <input
           id="ts-key"
           v-model="tsKey"
@@ -19,15 +35,34 @@
           class="w-full rounded-xl border-gray-200 text-sm"
           @input="update"
         />
-        <p class="text-xs text-gray-400 mt-1">Generate at <a href="https://login.tailscale.com/admin/settings/keys" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:underline">tailscale.com/admin</a></p>
+        <p class="text-xs text-gray-400 mt-1">
+          Generate at <a
+            href="https://login.tailscale.com/admin/settings/keys"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-primary-600 hover:underline"
+          >tailscale.com/admin</a>
+        </p>
       </div>
 
       <div class="flex items-center gap-3">
-        <input id="cf-enable" v-model="cloudflared" type="checkbox" class="rounded border-gray-300 text-primary-600" @change="update" />
-        <label for="cf-enable" class="text-sm text-gray-700">Enable Cloudflare Tunnel</label>
+        <input
+          id="cf-enable"
+          v-model="cloudflared"
+          type="checkbox"
+          class="rounded border-gray-300 text-primary-600"
+          @change="update"
+        />
+        <label
+          for="cf-enable"
+          class="text-sm text-gray-700"
+        >Enable Cloudflare Tunnel</label>
       </div>
       <div v-if="cloudflared">
-        <label for="cf-token" class="block text-xs font-medium text-gray-700 mb-1">Cloudflare Tunnel Token</label>
+        <label
+          for="cf-token"
+          class="block text-xs font-medium text-gray-700 mb-1"
+        >Cloudflare Tunnel Token</label>
         <input
           id="cf-token"
           v-model="cfToken"

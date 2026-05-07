@@ -1,8 +1,17 @@
 <template>
   <div class="w-full">
-    <div class="flex items-center justify-between mb-1" v-if="label || showValue">
-      <span v-if="label" class="text-xs font-medium text-gray-600">{{ label }}</span>
-      <span v-if="showValue" class="text-xs font-medium text-gray-500">{{ value }}%</span>
+    <div
+      v-if="label || showValue"
+      class="flex items-center justify-between mb-1"
+    >
+      <span
+        v-if="label"
+        class="text-xs font-medium text-gray-600"
+      >{{ label }}</span>
+      <span
+        v-if="showValue"
+        class="text-xs font-medium text-gray-500"
+      >{{ value }}%</span>
     </div>
     <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
       <progress
@@ -10,13 +19,13 @@
         :value="indeterminate ? undefined : value"
         max="100"
         :aria-label="label ?? 'Progress'"
-      />
+      ></progress>
       <div
         aria-hidden="true"
         class="h-full rounded-full transition-all duration-500"
         :class="[colorClass, indeterminate ? 'animate-shimmer w-1/2' : '']"
         :style="indeterminate ? {} : { width: `${value}%` }"
-      />
+      ></div>
     </div>
   </div>
 </template>

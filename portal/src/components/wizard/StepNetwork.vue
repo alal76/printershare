@@ -1,10 +1,17 @@
 <template>
   <div class="space-y-4">
-    <h3 class="font-semibold text-gray-900">Network Options</h3>
-    <p class="text-sm text-gray-500">Configure HTTPS port and Samba subnet (optional).</p>
+    <h3 class="font-semibold text-gray-900">
+      Network Options
+    </h3>
+    <p class="text-sm text-gray-500">
+      Configure HTTPS port and Samba subnet (optional).
+    </p>
     <div class="space-y-3">
       <div>
-        <label for="https-port" class="block text-xs font-medium text-gray-700 mb-1">HTTPS Port</label>
+        <label
+          for="https-port"
+          class="block text-xs font-medium text-gray-700 mb-1"
+        >HTTPS Port</label>
         <input
           id="https-port"
           v-model="httpsPort"
@@ -16,7 +23,10 @@
         />
       </div>
       <div>
-        <label for="samba-subnet" class="block text-xs font-medium text-gray-700 mb-1">Samba Allowed Subnet (CIDR)</label>
+        <label
+          for="samba-subnet"
+          class="block text-xs font-medium text-gray-700 mb-1"
+        >Samba Allowed Subnet (CIDR)</label>
         <input
           id="samba-subnet"
           v-model="sambaSubnet"

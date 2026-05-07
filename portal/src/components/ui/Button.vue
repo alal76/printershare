@@ -1,12 +1,19 @@
 <template>
   <button
+    type="button"
     v-bind="$attrs"
     :class="[variantClass, sizeClass, 'btn']"
     :disabled="disabled || loading"
   >
-    <Loader2Icon v-if="loading" class="w-4 h-4 animate-spin" />
-    <slot v-else-if="$slots.icon" name="icon" />
-    <slot />
+    <Loader2Icon
+      v-if="loading"
+      class="w-4 h-4 animate-spin"
+    />
+    <slot
+      v-else-if="$slots.icon"
+      name="icon"
+    ></slot>
+    <slot></slot>
   </button>
 </template>
 

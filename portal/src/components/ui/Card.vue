@@ -1,6 +1,9 @@
 <template>
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-100" :class="[padding ? 'p-5' : '', $attrs.class]">
-    <slot />
+  <div
+    class="bg-white rounded-2xl shadow-sm border border-gray-100"
+    :class="[padding ? 'p-5' : '', $attrs.class]"
+  >
+    <slot></slot>
   </div>
 </template>
 

@@ -14,9 +14,9 @@ export interface Toast {
 export const useToastStore = defineStore('toast', () => {
   const toasts = ref<Toast[]>([])
 
-  function add(toast: Omit<Toast, 'id'>) {
+  function add(toast: Omit<Toast, 'id' | 'duration'> & { duration?: number }) {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const t: Toast = { id, duration: 4000, ...toast }
+    const t: Toast = { duration: 4000, ...toast, id }
     toasts.value.push(t)
     if (t.duration > 0) {
       setTimeout(() => remove(id), t.duration)

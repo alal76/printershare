@@ -7,12 +7,23 @@
         class="w-full h-full rounded-2xl border border-gray-100"
         title="Paperless-ngx document archive"
         allow="same-origin"
-      />
-      <div v-else class="flex flex-col items-center justify-center h-full text-center text-gray-400">
+      ></iframe>
+      <div
+        v-else
+        class="flex flex-col items-center justify-center h-full text-center text-gray-400"
+      >
         <FileTextIcon class="w-12 h-12 mb-3" />
-        <p class="text-sm font-medium text-gray-600">Document archive not enabled</p>
-        <p class="text-xs mt-1">Enable <code class="font-mono">docs</code> profile in your compose setup.</p>
-        <Button variant="secondary" class="mt-4" @click="$router.push('/settings')">
+        <p class="text-sm font-medium text-gray-600">
+          Document archive not enabled
+        </p>
+        <p class="text-xs mt-1">
+          Enable <code class="font-mono">docs</code> profile in your compose setup.
+        </p>
+        <Button
+          variant="secondary"
+          class="mt-4"
+          @click="$router.push('/settings')"
+        >
           Go to Settings
         </Button>
       </div>

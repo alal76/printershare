@@ -1,58 +1,35 @@
 'use strict';
 
+/**
+ * @module routes/settings
+ * @description REST endpoints for reading and writing the `.env` runtime
+ * configuration file that is bind-mounted into the container.
+ *
+ * GET  /api/v1/settings       – Returns all keys (sensitive values redacted).
+ * PATCH /api/v1/settings      – Merges a partial key-value object into the
+ *                               file; unknown keys are appended.
+ */
+
 const router = require('express').Router();
-const fs     = require('node:fs');
-const path   = require('node:path');
+const { readEnv, writeEnvPatch } = require('../lib/env');
 
-const DOTENV_PATH = process.env.DOTENV_PATH || '/config/.env';
-
-/** Parse .env file into a key-value map (redacts passwords). */
-function readEnv(redact = true) {
-  const result = {};
-  try {
-    const lines = fs.readFileSync(DOTENV_PATH, 'utf8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq < 0) continue;
-      const key = trimmed.slice(0, eq).trim();
-      const val = trimmed.slice(eq + 1).trim();
-      const isPassword = /pass|secret|token|key/i.test(key);
-      result[key] = (redact && isPassword) ? '••••••••' : val;
-    }
-  } catch { /* file not found */ }
-  return result;
-}
-
-/** Write a partial update back to .env */
-function writeEnvPatch(patch) {
-  let content = '';
-  try { content = fs.readFileSync(DOTENV_PATH, 'utf8'); } catch { /* new */ }
-  const lines = content.split('\n');
-  for (const [k, v] of Object.entries(patch)) {
-    if (typeof v !== 'string' && typeof v !== 'number') continue;
-    // Prevent injection
-    const safeKey = k.replaceAll(/[^A-Z0-9_]/gi, '_');
-    const safeVal = String(v).replaceAll('\n', '');
-    const idx = lines.findIndex(l => l.startsWith(`${safeKey}=`));
-    if (idx >= 0) lines[idx] = `${safeKey}=${safeVal}`;
-    else lines.push(`${safeKey}=${safeVal}`);
-  }
-  fs.mkdirSync(path.dirname(DOTENV_PATH), { recursive: true });
-  fs.writeFileSync(DOTENV_PATH, lines.filter(l => l !== '').join('\n') + '\n');
-}
-
-// GET /api/v1/settings
+/**
+ * GET /api/v1/settings
+ * @returns {Record<string, string>} All .env keys; sensitive values replaced
+ *   with {@link REDACT_PLACEHOLDER}.
+ */
 router.get('/', (_req, res) => {
-  res.json(readEnv(true));
+  res.json(readEnv(undefined, true));
 });
 
-// PATCH /api/v1/settings
+/**
+ * PATCH /api/v1/settings
+ * @param {Record<string, string>} req.body - Key-value pairs to update.
+ */
 router.patch('/', (req, res) => {
   const patch = req.body;
-  if (!patch || typeof patch !== 'object') {
-    return res.status(400).json({ error: 'Expected JSON object' });
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return res.status(400).json({ error: 'Expected a JSON object' });
   }
   try {
     writeEnvPatch(patch);

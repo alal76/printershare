@@ -1,2 +1,17 @@
 .env
+.env.local
 *.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Build outputs
+portal/dist/
+portal/coverage/
+portal/playwright-report/
+portal/test-results/
+
+# macOS
+.DS_Store
+
