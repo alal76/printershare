@@ -1,0 +1,112 @@
+version: "3.8"
+
+# ═══════════════════════════════════════════════════════════════════
+#  printershare — USB Printer + Scanner LAN Share Stack
+#
+#  Services
+#  --------
+#    cups        CUPS print server          http://<HOST>:631
+#    scanservjs  Web scanner UI             http://<HOST>/
+#    samba       SMB/CIFS share             \\\\<HOST>\\Scans
+#    nfs         NFS share                  <HOST>:/exports/scans
+#    nginx       Reverse proxy / entry      http://<HOST>:80
+#
+#  Quick start
+#  -----------
+#    make setup
+#    nano .env           # set passwords
+#    make build start
+# ═══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── CUPS ───────────────────────────────────────────────────────
+  # network_mode: host so Avahi/mDNS Bonjour reaches the LAN
+  cups:
+    build:
+      context: ./cups
+    container_name: ps-cups
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    volumes:
+      - /var/run/dbus:/var/run/dbus
+      - cups-config:/etc/cups
+      - cups-ppd:/usr/share/cups/model
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      CUPSADMIN:    ${CUPS_ADMIN_USER:-admin}
+      CUPSPASSWORD: ${CUPS_ADMIN_PASS:-changeme}
+
+  # ── Scanservjs ─────────────────────────────────────────────────
+  # Web UI for scanning; rclone uploads to Google Drive / OneDrive
+  scanservjs:
+    build:
+      context: ./scanservjs
+    container_name: ps-scanservjs
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "${SCANSERVJS_PORT:-8080}:8080"
+    volumes:
+      - ${SCANS_HOST_PATH:-/srv/printershare/scans}:/app/data/output
+      - ./scanservjs/config.js:/app/config/config.js:ro
+      - ${RCLONE_CONFIG_PATH:-/root/.config/rclone}:/root/.config/rclone
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      RCLONE_GDRIVE_REMOTE:   ${RCLONE_GDRIVE_REMOTE:-gdrive}
+      RCLONE_ONEDRIVE_REMOTE: ${RCLONE_ONEDRIVE_REMOTE:-onedrive}
+
+  # ── Samba ──────────────────────────────────────────────────────
+  # Windows: \\<HOST>\Scans   Mac: smb://<HOST>/Scans
+  # network_mode: host so NetBIOS name broadcasts reach the LAN
+  samba:
+    image: dperson/samba:latest
+    container_name: ps-samba
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ${SCANS_HOST_PATH:-/srv/printershare/scans}:/scans
+    environment:
+      USERID:  "1000"
+      GROUPID: "1000"
+    command: >-
+      -s "Scans;/scans;yes;no;yes;all;;;Scanned documents"
+      -u "${SAMBA_USER:-scanner};${SAMBA_PASS:-scanner123}"
+      -p
+
+  # ── NFS ────────────────────────────────────────────────────────
+  # Linux:  sudo mount <HOST>:/exports/scans /mnt/scans
+  # macOS:  mount -t nfs <HOST>:/exports/scans /Volumes/scans
+  nfs:
+    image: erichough/nfs-server:latest
+    container_name: ps-nfs
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "2049:2049"
+      - "111:111/tcp"
+      - "111:111/udp"
+    volumes:
+      - ${SCANS_HOST_PATH:-/srv/printershare/scans}:/exports/scans
+      - ./nfs/exports:/etc/exports:ro
+
+  # ── Nginx ──────────────────────────────────────────────────────
+  # Port 80  ->  Scanservjs web UI
+  # /cups    ->  CUPS admin (via host network)
+  nginx:
+    image: nginx:alpine
+    container_name: ps-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  cups-config:
+  cups-ppd:

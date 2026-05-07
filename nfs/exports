@@ -1,0 +1,6 @@
+# NFS exports — served by erichough/nfs-server container
+#
+# For production restrict to your LAN subnet, e.g.:
+#   /exports/scans 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash,insecure)
+
+/exports/scans *(rw,sync,no_subtree_check,no_root_squash,insecure)
