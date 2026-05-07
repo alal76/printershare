@@ -10,6 +10,44 @@ const {
   verifySessionToken,
 } = require('../lib/auth');
 
+// ── Brute-force protection (in-memory sliding window) ────────────────────
+// Max 10 failed attempts per IP in a 15-minute window.
+const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_WINDOW_MS    = 15 * 60 * 1000; // 15 min
+
+/** @type {Map<string, { count: number, windowStart: number }>} */
+const loginAttempts = new Map();
+
+function getClientIp(req) {
+  // Trust X-Forwarded-For only if behind a trusted proxy (nginx)
+  const fwd = req.headers['x-forwarded-for'];
+  return (fwd ? String(fwd).split(',')[0].trim() : null) || req.socket.remoteAddress || 'unknown';
+}
+
+function isRateLimited(ip) {
+  const now   = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now - entry.windowStart > LOGIN_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 0, windowStart: now });
+    return false;
+  }
+  return entry.count >= LOGIN_MAX_ATTEMPTS;
+}
+
+function recordFailedAttempt(ip) {
+  const now   = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now - entry.windowStart > LOGIN_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, windowStart: now });
+  } else {
+    entry.count += 1;
+  }
+}
+
+function clearAttempts(ip) {
+  loginAttempts.delete(ip);
+}
+
 function setSessionCookie(res, token) {
   const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
   const attrs = [
@@ -45,9 +83,15 @@ router.post('/login', (req, res) => {
   if (!AUTH_ENABLED) {
     return res.json({ ok: true, authEnabled: false, user: 'anonymous' });
   }
+  const ip = getClientIp(req);
+  if (isRateLimited(ip)) {
+    return res.status(429).json({ error: 'Too many login attempts. Try again later.' });
+  }
   if (!verifyCredentials(String(username || ''), String(password || ''))) {
+    recordFailedAttempt(ip);
     return res.status(401).json({ error: 'Invalid credentials' });
   }
+  clearAttempts(ip);
   const token = createSessionToken(String(username));
   setSessionCookie(res, token);
   return res.json({ ok: true, authEnabled: true, user: username });

@@ -21,21 +21,39 @@ function run(command, args, timeout = 5000) {
   return result.stdout.trim();
 }
 
+function parsePrintLine(line, defaultState) {
+  const m = /^(\S+)-(\d+)\s+\S+\s+(\d+)\s+(.+?)(?:\s+(completed|aborted|canceled))?$/.exec(line.trim());
+  if (!m) return null;
+
+  let state = defaultState;
+  const stateWord = (m[5] || '').toLowerCase();
+  if (stateWord === 'aborted')   state = 'failed';
+  if (stateWord === 'canceled')  state = 'canceled';
+  if (stateWord === 'completed') state = 'completed';
+
+  return {
+    id:      `${m[1]}-${m[2]}`,
+    name:    `${m[1]} #${m[2]}`,
+    state,
+    size:    Number.parseInt(m[3], 10) || 0,
+    created: m[4].trim(),
+  };
+}
+
 function parseQueue() {
-  const out = run('lpstat', ['-W', 'not-completed'], 5000);
-  const lines = out ? out.split('\n') : [];
+  // Query both active (not-completed) and recent completed jobs
+  const activeOut    = (() => { try { return run('lpstat', ['-W', 'not-completed'], 5000); } catch { return ''; } })();
+  const completedOut = (() => { try { return run('lpstat', ['-W', 'completed'],     5000); } catch { return ''; } })();
+
   const jobs = [];
 
-  for (const line of lines) {
-    const m = /^(\S+)-(\d+)\s+\S+\s+(\d+)\s+(.+)$/.exec(line.trim());
-    if (!m) continue;
-    jobs.push({
-      id: `${m[1]}-${m[2]}`,
-      name: `${m[1]} #${m[2]}`,
-      state: 'processing',
-      size: Number.parseInt(m[3], 10) || 0,
-      created: m[4],
-    });
+  for (const line of (activeOut    ? activeOut.split('\n')    : [])) {
+    const job = parsePrintLine(line, 'processing');
+    if (job) jobs.push(job);
+  }
+  for (const line of (completedOut ? completedOut.split('\n') : [])) {
+    const job = parsePrintLine(line, 'completed');
+    if (job && !jobs.some(j => j.id === job.id)) jobs.push(job);
   }
 
   return jobs;

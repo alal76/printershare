@@ -83,6 +83,8 @@ make down     # stop all services
 
 Navigate to **http://\<host-ip\>** in your browser. The Setup Wizard launches automatically on first run.
 
+For complete setup, operations, and troubleshooting instructions, see [USER_GUIDE.md](USER_GUIDE.md).
+
 ---
 
 ## Setup Wizard
@@ -147,18 +149,22 @@ sudo mount -t nfs <host-ip>:/data/scans /mnt/scans
 | Variable | Default | Description |
 |---|---|---|
 | `PORTAL_PORT` | `3000` | Portal Express server port |
-| `PORTAL_SECRET` | — | JWT / session secret |
-| `HTTPS_PORT` | `443` | nginx HTTPS port |
+| `PORTAL_SECRET` | — | HMAC session secret (set a strong random value) |
+| `PORTAL_AUTH` | `false` | Set `true` to enable login (recommended in production) |
+| `NGINX_HTTP_PORT` | `80` | nginx HTTP port |
+| `NGINX_HTTPS_PORT` | `443` | nginx HTTPS port |
 | `CUPS_HOST` | `cups` | CUPS service hostname |
 | `CUPS_PORT` | `631` | CUPS service port |
 | `SAMBA_PASS` | — | Samba share password |
 | `SAMBA_WORKGROUP` | `WORKGROUP` | Samba workgroup name |
 | `SAMBA_SHARE` | `scans` | Samba share name |
-| `NFS_NETWORK` | `192.168.0.0/16` | Allowed NFS client network |
-| `RCLONE_REMOTE` | — | rclone remote name for cloud upload |
-| `RCLONE_BUCKET` | — | Cloud bucket/path |
+| `NFS_ALLOWED_SUBNET` | `192.168.0.0/16` | Allowed NFS client network (CIDR) |
+| `SCANS_HOST_PATH` | `/srv/printershare/scans` | Host path for scan files |
+| `RCLONE_GDRIVE_REMOTE` | — | Rclone remote name for Google Drive cloud upload |
+| `RCLONE_ONEDRIVE_REMOTE` | — | Rclone remote name for OneDrive cloud upload |
 | `TAILSCALE_AUTH_KEY` | — | Tailscale auth key for VPN |
 | `CLOUDFLARE_TUNNEL_TOKEN` | — | Cloudflare Tunnel token |
+| `COMPOSE_PROFILES` | — | Comma-separated optional profiles: `docs`, `remote` |
 
 See [`.env.example`](.env.example) for the full list with documentation.
 
@@ -256,6 +262,41 @@ Base path: `/api/v1`
 ./scripts/deploy.sh --no-build       # skip image build
 ./scripts/deploy.sh --env-file /path/to/.env
 ```
+
+### Proxmox LXC USB passthrough (container host 192.168.0.9)
+
+If your Docker host is an LXC container on Proxmox (for example at `192.168.0.9`), pass the USB bus through from the Proxmox node into that LXC container before starting PrinterShare.
+
+1. On the Proxmox node, identify the LXC ID and USB device:
+  ```bash
+  pct list
+  lsusb
+  ```
+2. Stop the LXC container:
+  ```bash
+  pct stop <CTID>
+  ```
+3. Enable Docker-friendly LXC features:
+  ```bash
+  pct set <CTID> -features nesting=1,keyctl=1
+  ```
+4. Edit `/etc/pve/lxc/<CTID>.conf` and add:
+  ```ini
+  lxc.cgroup2.devices.allow: c 189:* rwm
+  lxc.mount.entry: /dev/bus/usb dev/bus/usb none bind,optional,create=dir
+  ```
+5. Start the container and verify USB visibility inside it:
+  ```bash
+  pct start <CTID>
+  pct exec <CTID> -- lsusb
+  ```
+6. In the LXC container (`192.168.0.9`), start PrinterShare:
+  ```bash
+  cd /path/to/printershare
+  docker compose up -d
+  ```
+
+If `lsusb` inside the container does not show your device, unplug and reconnect the USB cable, then restart the LXC container and retry.
 
 ### Backup
 

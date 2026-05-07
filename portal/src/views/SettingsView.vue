@@ -43,7 +43,7 @@
       <!-- ── Cloud Backup ────────────────────────────────────────────────── -->
       <SettingsSection
         title="Cloud Backup"
-        description="Rclone remote for automatic scan file backups."
+        description="Rclone remotes for automatic scan file backups to Google Drive or OneDrive."
         icon="cloud"
         :fields="cloudFields"
         :patch="patch"
@@ -170,8 +170,8 @@ const securityFields: Field[] = [
 ]
 
 const cloudFields: Field[] = [
-  { key: 'RCLONE_REMOTE', label: 'Rclone Remote Name', placeholder: 'gdrive', hint: 'Name of the rclone remote (leave blank to disable)' },
-  { key: 'RCLONE_BUCKET', label: 'Bucket / Path',      placeholder: 'my-bucket/scans' },
+  { key: 'RCLONE_GDRIVE_REMOTE',   label: 'Google Drive Remote',  placeholder: 'gdrive',   hint: 'Rclone remote name for Google Drive (leave blank to disable)' },
+  { key: 'RCLONE_ONEDRIVE_REMOTE', label: 'OneDrive Remote',      placeholder: 'onedrive', hint: 'Rclone remote name for OneDrive (leave blank to disable)' },
 ]
 
 const remoteFields: Field[] = [

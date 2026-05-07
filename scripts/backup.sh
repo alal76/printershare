@@ -34,11 +34,16 @@ echo "==> Backing up .env..."
 
 echo "==> Backing up named Docker volumes..."
 VOLUMES=(
-  printershare_cups-data
-  printershare_scans
-  printershare_paperless-data
-  printershare_paperless-db-data
-  printershare_samba-data
+  cups-config
+  cups-ppd
+  portal-data
+  ipp-usb-state
+  rclone-config
+  paperless-data
+  paperless-media
+  paperless-db
+  paperless-redis
+  tailscale-state
 )
 for vol in "${VOLUMES[@]}"; do
   if docker volume inspect "${vol}" &>/dev/null; then
@@ -51,6 +56,15 @@ for vol in "${VOLUMES[@]}"; do
     echo "    [skip] ${vol} not found"
   fi
 done
+
+# ── Back up host bind-mount (scan files) ────────────────────────
+SCANS_PATH="${SCANS_HOST_PATH:-/srv/printershare/scans}"
+if [[ -d "${SCANS_PATH}" ]]; then
+  echo "==> Backing up scan files from ${SCANS_PATH}..."
+  tar -czf "${TMP_DIR}/scans.tar.gz" -C "${SCANS_PATH}" .
+else
+  echo "    [skip] scan path ${SCANS_PATH} not found"
+fi
 
 echo "==> Creating archive ${ARCHIVE}..."
 tar -czf "${ARCHIVE}" -C "${TMP_DIR}" .

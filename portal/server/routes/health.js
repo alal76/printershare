@@ -9,6 +9,15 @@ const SCANSERVJS_INTERNAL = process.env.SCANSERVJS_INTERNAL || 'http://ps-scanse
 const PAPERLESS_INTERNAL  = process.env.PAPERLESS_INTERNAL  || 'http://ps-paperless:8000';
 
 /**
+ * Parse COMPOSE_PROFILES env var into a Set of active profile names.
+ * @returns {Set<string>}
+ */
+function activeProfiles() {
+  const raw = process.env.COMPOSE_PROFILES || '';
+  return new Set(raw.split(',').map(p => p.trim()).filter(Boolean));
+}
+
+/**
  * Probe an HTTP endpoint. Returns { ok, latency_ms, message? }.
  */
 async function probe(url, timeoutMs = 5000) {
@@ -40,29 +49,36 @@ function containerRunning(name) {
   }
 }
 
+/**
+ * Build a service status entry, returning `disabled` when the owning profile
+ * is not active.
+ */
+function serviceStatus(enabled, isUp, latencyMs = 0) {
+  if (!enabled)  return { status: 'disabled', latency_ms: 0 };
+  return { status: isUp ? 'ok' : 'offline', latency_ms: latencyMs };
+}
+
 // GET /api/v1/health
 router.get('/', async (_req, res) => {
+  const profiles = activeProfiles();
+  const docsEnabled   = profiles.has('docs');
+  const remoteEnabled = profiles.has('remote');
+
   const [cups, scanservjs, paperless] = await Promise.all([
     probe(`http://${CUPS_HOST}:${CUPS_PORT}/`),
     probe(`${SCANSERVJS_INTERNAL}/api/v1/context`),
-    probe(`${PAPERLESS_INTERNAL}/api/`),
+    docsEnabled ? probe(`${PAPERLESS_INTERNAL}/api/`) : Promise.resolve({ ok: false, latency_ms: 0 }),
   ]);
 
-  const ippUsb    = containerRunning('ps-ipp-usb');
-  const samba     = containerRunning('ps-samba');
-  const nfs       = containerRunning('ps-nfs');
-  const tailscale = containerRunning('ps-tailscale');
-  const cloudflare = containerRunning('ps-cloudflared');
-
   const services = {
-    cups:       { status: cups.ok      ? 'ok' : 'error',   latency_ms: cups.latency_ms,      message: cups.message },
-    'ipp-usb':  { status: ippUsb       ? 'ok' : 'offline', latency_ms: 0 },
-    scanservjs: { status: scanservjs.ok ? 'ok' : 'error',  latency_ms: scanservjs.latency_ms, message: scanservjs.message },
-    paperless:  { status: paperless.ok  ? 'ok' : 'offline', latency_ms: paperless.latency_ms },
-    samba:      { status: samba         ? 'ok' : 'offline', latency_ms: 0 },
-    nfs:        { status: nfs           ? 'ok' : 'offline', latency_ms: 0 },
-    tailscale:  { status: tailscale     ? 'ok' : 'offline', latency_ms: 0 },
-    cloudflare: { status: cloudflare    ? 'ok' : 'offline', latency_ms: 0 },
+    cups:       { status: cups.ok       ? 'ok' : 'error', latency_ms: cups.latency_ms,      message: cups.message },
+    'ipp-usb':  serviceStatus(true,          containerRunning('ps-ipp-usb')),
+    scanservjs: { status: scanservjs.ok ? 'ok' : 'error', latency_ms: scanservjs.latency_ms, message: scanservjs.message },
+    paperless:  serviceStatus(docsEnabled,   paperless.ok, paperless.latency_ms),
+    samba:      serviceStatus(true,          containerRunning('ps-samba')),
+    nfs:        serviceStatus(true,          containerRunning('ps-nfs')),
+    tailscale:  serviceStatus(remoteEnabled, containerRunning('ps-tailscale')),
+    cloudflare: serviceStatus(remoteEnabled, containerRunning('ps-cloudflared')),
   };
 
   const hasError = Object.values(services).some(s => s.status === 'error');

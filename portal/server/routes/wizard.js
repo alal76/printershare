@@ -19,6 +19,7 @@ const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
 const { spawn } = require('node:child_process');
+const { sanitizePatch } = require('./settings');
 /* env.js imported when wizard needs to write settings */
 
 const DATA_DIR   = process.env.PORTAL_DATA_DIR || '/app/data';
@@ -66,13 +67,14 @@ router.post('/state', (req, res) => {
 
 /**
  * Merge key=value pairs from config object into the .env file.
+ * Only keys that pass sanitizePatch validation are written.
  */
 function mergeEnv(dotenvPath, config) {
+  const clean = sanitizePatch(config);
   let existing = '';
   try { existing = fs.readFileSync(dotenvPath, 'utf8'); } catch { /* new file */ }
   const lines = existing.split('\n');
-  for (const [k, v] of Object.entries(config)) {
-    if (typeof v !== 'string' && typeof v !== 'number') continue;
+  for (const [k, v] of Object.entries(clean)) {
     const idx = lines.findIndex(l => l.startsWith(`${k}=`));
     const line = `${k}=${String(v)}`;
     if (idx >= 0) lines[idx] = line;
