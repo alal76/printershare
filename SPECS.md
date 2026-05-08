@@ -40,187 +40,210 @@ Assessment date: May 2026.
 
 | Capability area | Vision target | Current status | Notes |
 |---|---|---|---|
-| Unified web portal | Full web UI for setup + operations | ✅ Implemented | Dashboard, Devices, Scan, Print, Sharing, Settings, Wizard present |
-| 7-step setup wizard | Guided first-run setup and build | ⚠️ Partial | 7 steps exist, but build/log/progress flow is incomplete (see gaps G2, G3) |
-| AirPrint / Mopria | Driverless print over LAN | ✅ Mostly implemented | CUPS + ipp-usb + auto `everywhere` registration present |
-| AirScan/eSCL | Driverless scan for Apple/mobile | ✅ Infrastructure present | `ipp-usb` and `sane-airscan` included |
-| Scan workflows | Browse/download/delete scans | ✅ Implemented | `/api/v1/scans` route and scan views available |
-| Print workflows | Upload/print + real queue | ⚠️ Partial | Upload/print exists; queue/status is still stubbed (G5) |
-| Paperless docs library | `/docs/` integration + OCR | ⚠️ Partial | Profile-based integration exists; UI is iframe-only, no native metadata/search UX |
-| Sharing (SMB/NFS) | Cross-platform path guidance | ✅ Implemented | Sharing view and compose services present |
-| Remote access | Tailscale + Cloudflare optional path | ✅ Implemented | Profile-based services and wizard inputs present |
-| Security hardening | Auth, least privilege, secrets, TLS | ❌ Incomplete | Multiple high-risk items open (G1, G4, G7) |
-| Mobile-first UX | Functional and responsive mobile flows | ⚠️ Partial | Responsive UI exists; deeper mobile-specific scan/document UX still limited |
-| Observability | Reliable health + logs + actionable status | ⚠️ Partial | Health/log endpoints exist; some health semantics are noisy/fragile |
+| Unified web portal | Full web UI for setup + operations | ✅ Implemented | Dashboard-first UX, Wizard, Devices, Scan, Print, Sharing, Docs, Settings are wired |
+| 7-step setup wizard | Guided first-run setup and build | ✅ Mostly implemented | Completion now depends on successful compose exit and SSE consume |
+| AirPrint / Mopria | Driverless print over LAN | ✅ Implemented | CUPS + ipp-usb + host-network services are present |
+| AirScan/eSCL | Driverless scan for Apple/mobile | ✅ Infrastructure present | scanservjs includes sane-airscan; ipp-usb enabled |
+| Scan workflows | Browse/download/delete scans | ✅ Implemented | API + UI paths are present and unit-tested |
+| Print workflows | Upload/print + queue visibility | ⚠️ Partial | Real `lp`/`lpstat` integration exists, but queue model is still shallow |
+| Paperless docs library | `/docs/` integration + OCR | ⚠️ Partial | Integration works, but portal UX is still iframe-only |
+| Sharing (SMB/NFS) | Cross-platform path guidance | ✅ Implemented | Sharing UI + copy affordances are present |
+| Remote access | Tailscale + Cloudflare optional path | ✅ Implemented | Compose profiles and settings fields exist |
+| Security hardening | Auth, least privilege, secrets, TLS | ⚠️ Partial | Session auth exists; secure-by-default posture still incomplete |
+| Mobile-first UX | Functional and responsive mobile flows | ✅ Mostly implemented | Responsive layout and mobile browser E2E now pass |
+| Observability | Reliable health + logs + actionable status | ⚠️ Partial | Health/log APIs exist; profile awareness and richer diagnostics are pending |
 
 ---
 
-### 1.3 High-priority gaps (ranked)
+### 1.3 Recently closed gaps (since prior review)
 
-#### G1 (Critical): No portal authentication or API authorization
+1. Portal authentication and API authorization implemented.
+  - Evidence: `portal/server/app.js`, `portal/server/routes/auth.js`, `portal/server/lib/auth.js`, `portal/src/stores/auth.ts`, `portal/src/views/LoginView.vue`.
 
-Impact:
+2. Wizard completion semantics corrected.
+  - Evidence: `portal/server/routes/wizard.js` sets `completed=true` only on build exit code 0.
+  - Evidence: `portal/src/components/wizard/WizardShell.vue` only redirects when SSE includes `type=complete`.
 
-- Any user on reachable network can mutate settings, restart services, reset wizard, and trigger builds.
-- Vision section on security is not met.
+3. Settings and command execution hardening improved.
+  - Evidence: strict allowlist/validation in `portal/server/routes/settings.js`.
+  - Evidence: service restart uses arg-array execution and allowlist in `portal/server/routes/services.js`.
 
-Evidence:
-
-- API routes are mounted directly without auth guard in `portal/server/app.js`.
-- `PORTAL_AUTH` is documented in `.env.example` but not enforced in server code.
-
-Enhancement:
-
-- Implement middleware-level auth for all mutating routes (`POST`, `PATCH`, `DELETE`) and sensitive reads (`/settings`, `/logs`).
-- Support secure session auth (recommended) or hardened HTTP Basic as minimum fallback.
-
-#### G2 (High): Wizard marks completion before compose build outcome is known
-
-Impact:
-
-- Wizard can report success and route to dashboard even when build fails.
-- First-run UX trust is degraded.
-
-Evidence:
-
-- `portal/server/routes/wizard.js`: `state.completed = true` is set before child process close.
-- `portal/src/components/wizard/WizardShell.vue`: UI sets `wizardCompleted = true` and redirects after `fetch`, without consuming stream outcome.
-
-Enhancement:
-
-- Convert to EventSource/SSE client flow in wizard UI.
-- Set completion state only after compose exits `0`.
-- Persist failure reason for recovery and retry UX.
-
-#### G3 (High): Settings UI writes keys that do not drive runtime configuration
-
-Impact:
-
-- Users think they changed core ports/network values, but compose/env variables are mismatched.
-- Creates configuration drift and support burden.
-
-Evidence:
-
-- `portal/src/views/SettingsView.vue` uses keys like `HTTPS_PORT`, `PORTAL_PORT`, `NFS_NETWORK`.
-- Actual compose/env keys are `NGINX_HTTPS_PORT`, `PORT`, and `NFS_ALLOWED_SUBNET` (see `.env.example`, `docker-compose.yml`).
-
-Enhancement:
-
-- Align settings schema to canonical env keys.
-- Add server-side key allowlist + validation and reject unknown keys.
-- Show restart-required badges per setting.
-
-#### G4 (High): Command execution surface is too open
-
-Impact:
-
-- Combined with no auth, this is a severe operational risk.
-- Increases likelihood of command/path injection and abuse.
-
-Evidence:
-
-- `portal/server/routes/settings.js` writes arbitrary keys from request body.
-- `portal/server/routes/services.js` shells out with interpolated compose file value.
-
-Enhancement:
-
-- Enforce strict config schema and value validation (type, range, regex).
-- Use spawn arg arrays consistently instead of shell-interpolated commands.
-- Split mutable user config from internal operational env variables.
-
-#### G5 (Medium): Print queue and printer discovery APIs are placeholders
-
-Impact:
-
-- Print module appears complete but operational visibility is limited.
-- Queue UI cannot surface real job state and failure reasons.
-
-Evidence:
-
-- `portal/server/routes/print.js` queue endpoint returns minimal status with empty jobs.
-- `portal/server/services/cups-client.js` `listPrinters()` returns synthetic `USB-Printer` response.
-
-Enhancement:
-
-- Integrate a real CUPS IPP parser/library or robust `lpstat` adapter.
-- Return normalized job model (`queued`, `processing`, `completed`, `failed`, `reason`).
-
-#### G6 (Medium): Frontend and tests are out of sync in places
-
-Impact:
-
-- E2E tests can pass/fail for wrong reasons; regressions may slip.
-
-Evidence:
-
-- Playwright tests use assumptions that do not match UI semantics in several selectors and mocked payload expectations.
-
-Enhancement:
-
-- Introduce stable `data-testid` attributes on critical controls.
-- Align mock contracts with current API and add regression tests for wizard/build result handling.
-
-#### G7 (Medium): Security hardening roadmap items remain open
-
-Impact:
-
-- Production deployment risk remains elevated.
-
-Evidence:
-
-- `nfs/exports` currently exports to `*` with permissive options.
-- `docker-compose.yml` still includes privileged services (`ipp-usb`, `nfs`).
-- Secrets are still plain env values.
-
-Enhancement:
-
-- Restrict NFS subnet at runtime and default-deny.
-- Reduce privilege scope where possible (`cap_add`, device rules).
-- Move sensitive values to Docker secrets or external secret store.
-
-#### G8 (Low): PWA polish is incomplete
-
-Impact:
-
-- Installability/branding quality issues.
-
-Evidence:
-
-- `portal/index.html` references `/printer.svg` icon that is not present in `portal/public`.
-- `portal/public/manifest.json` references icons not present in `portal/public/icons`.
-
-Enhancement:
-
-- Add missing icon assets and verify Lighthouse installability.
+4. End-to-end test stability materially improved.
+  - Evidence: stable selectors and role assertions in current `portal/tests/e2e/*` suite.
 
 ---
 
-### 1.4 Enhancement backlog (prioritized)
+### 1.4 High-priority remaining gaps (ranked)
 
-#### Now (security and correctness)
+#### G1 (High): Settings UI/API schema drift for cloud fields
 
-1. Add authentication/authorization to portal API and settings pages.
-2. Lock down settings patch API with allowlist and validation.
-3. Fix wizard build flow so success/failure is authoritative.
-4. Align settings keys with compose/env keys.
+Impact:
 
-#### Next (operational fidelity)
+- Cloud backup settings can appear editable but fail to persist correctly.
+- Users experience silent config drift and reduced trust.
 
-1. Replace print queue/printer stubs with real CUPS-backed state.
-2. Improve health model to distinguish `offline`, `degraded`, and `misconfigured` with remediation hints.
-3. Bring E2E tests in line with real DOM and API contracts.
+Evidence:
 
-#### Later (product polish)
+- UI uses `RCLONE_REMOTE` and `RCLONE_BUCKET` in `portal/src/views/SettingsView.vue`.
+- Backend allowlist accepts `RCLONE_GDRIVE_REMOTE` and `RCLONE_ONEDRIVE_REMOTE` in `portal/server/routes/settings.js`.
 
-1. Implement native document management UX over Paperless API (search, metadata edit, detail panel).
-2. Complete PWA assets and offline strategy for portal shell.
-3. Add i18n and accessibility hardening pass.
+Enhancement:
+
+- Introduce one canonical settings schema shared by UI and API.
+- Return field-level errors and surface them inline in settings sections.
+
+#### G2 (High): Wizard build path bypasses settings validation contract
+
+Impact:
+
+- Wizard can write arbitrary keys to `.env` and bypass server-side settings validators.
+- Raises runtime misconfiguration and safety risk.
+
+Evidence:
+
+- `mergeEnv` in `portal/server/routes/wizard.js` writes all string/number keys from `config`.
+
+Enhancement:
+
+- Reuse the same allowlist and validators from settings route for wizard writes.
+- Persist validation failures with actionable recovery guidance.
+
+#### G3 (High): Backup workflow is stale against current compose layout
+
+Impact:
+
+- Backup archives can omit critical runtime state.
+- Disaster recovery confidence is currently weak.
+
+Evidence:
+
+- `scripts/backup.sh` references legacy volume names (`printershare_*`).
+- Current stack uses `cups-config`, `portal-data`, `paperless-*` named volumes plus host bind mounts in `docker-compose.yml`.
+
+Enhancement:
+
+- Update backup script to match current volume and bind-path topology.
+- Add restore script and periodic restore verification.
+
+#### G4 (Medium): Security posture still weak by default for production
+
+Impact:
+
+- Misconfigured deployments remain easy if operators keep defaults.
+
+Evidence:
+
+- `.env.example` still includes weak placeholder secrets (`changeme` family).
+- `PORTAL_AUTH=false` default.
+- `privileged: true` remains on `ipp-usb` and `nfs` in `docker-compose.yml`.
+
+Enhancement:
+
+- Enforce strong first-run secrets and secure defaults.
+- Add auth rate-limits/lockout for login endpoint.
+- Reduce privileges where technically feasible and document hard constraints.
+
+#### G5 (Medium): Print queue model lacks full lifecycle diagnostics
+
+Impact:
+
+- Limited ability to troubleshoot failed/completed jobs and user-reported print issues.
+
+Evidence:
+
+- `portal/server/routes/print.js` parses only `not-completed` jobs and maps to `processing`.
+
+Enhancement:
+
+- Add failed/completed/canceled states, reason fields, and short history endpoint.
+
+#### G6 (Medium): Documentation contract drift across README/spec/env
+
+Impact:
+
+- Operators may configure wrong keys based on stale docs.
+
+Evidence:
+
+- `README.md` environment section still references legacy names (`PORTAL_PORT`, `HTTPS_PORT`, `NFS_NETWORK`) that differ from `.env.example` and settings/backend keys.
+
+Enhancement:
+
+- Generate env reference docs from a single canonical schema.
+- Add CI check for docs vs schema consistency.
+
+#### G7 (Medium): High-risk path test coverage gaps
+
+Impact:
+
+- Security/setup regressions can slip while current tests still pass.
+
+Evidence:
+
+- No auth E2E spec in `portal/tests/e2e/`.
+- No integration test proving wizard/build respects settings schema constraints.
+
+Enhancement:
+
+- Add E2E auth coverage (login/logout/guard redirects/protected API).
+- Add wizard validation integration tests.
+
+#### G8 (Low-Medium): Paperless integration is functional but shallow
+
+Impact:
+
+- Portal does not yet fulfill richer native document management experience.
+
+Evidence:
+
+- `portal/src/views/DocsView.vue` is currently an iframe wrapper over `/docs/`.
+
+Enhancement:
+
+- Add native portal document list/search/metadata operations over Paperless APIs.
+
+#### G9 (Low-Medium): Health model is not profile-aware
+
+Impact:
+
+- Optional services can appear as noisy offline statuses rather than intentionally disabled.
+
+Evidence:
+
+- `portal/server/routes/health.js` probes optional services regardless of profile intent.
+
+Enhancement:
+
+- Distinguish `disabled` vs `offline` vs `error` and include remediation hints.
 
 ---
 
-### 1.5 Updated status summary
+### 1.5 Enhancement backlog (prioritized)
 
-The solution has progressed from design to a working end-to-end platform for local print/scan/sharing, including a functional web portal and deployable compose stack. The largest remaining deltas versus the vision are in security controls, wizard reliability semantics, config schema consistency, and deeper operational fidelity (real queue/state observability).
+#### Now (correctness and operational safety)
+
+1. Unify settings schema between frontend and backend (including cloud fields).
+2. Apply settings validators to wizard build writes.
+3. Repair backup flow and deliver restore + verification tooling.
+4. Align README/spec environment key documentation with real runtime schema.
+
+#### Next (security and observability depth)
+
+1. Improve secure-by-default posture (forced first-run secrets, auth defaults, brute-force protections).
+2. Reduce privileged service footprint where feasible.
+3. Make health responses profile-aware with actionable diagnostics.
+
+#### Later (capability expansion)
+
+1. Expand print queue lifecycle visibility and failure diagnostics.
+2. Build native Paperless document UX in portal.
+3. Add E2E/integration coverage for auth + wizard critical paths.
+
+---
+
+### 1.6 Updated status summary
+
+The solution is now in a materially stronger state than earlier reviews: auth, wizard completion semantics, and E2E stability have improved significantly. The most important remaining deltas versus the vision are no longer broad platform gaps; they are concentrated in schema consistency, backup/restore reliability, secure-by-default hardening, and deeper operational/document-management fidelity.
 
 ---
 

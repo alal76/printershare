@@ -55,6 +55,12 @@ A self-hosted, all-in-one printer and scanner sharing solution built on Docker C
 
 ## Quick Start
 
+Set your server address once and use it throughout:
+
+```bash
+HOST_IP=<your-server-ip>
+```
+
 ### 1. Clone and configure
 
 ```bash
@@ -81,7 +87,7 @@ make down     # stop all services
 
 ### 3. Open the portal
 
-Navigate to **http://\<host-ip\>** in your browser. The Setup Wizard launches automatically on first run.
+Navigate to **http://${HOST_IP}/** in your browser. The Setup Wizard launches automatically on first run.
 
 For complete setup, operations, and troubleshooting instructions, see [USER_GUIDE.md](USER_GUIDE.md).
 
@@ -111,7 +117,7 @@ No configuration needed. Your printer appears in the Print dialog automatically 
 2. Click **Add device** — Windows discovers the IPP printer automatically
 3. If not found, choose **Add manually** and enter:
    ```
-   http://<host-ip>:631/printers/USB-Printer
+   http://${HOST_IP}:631/printers/USB-Printer
    ```
 
 ### Android (Mopria)
@@ -121,7 +127,7 @@ No configuration needed. Your printer appears in the Print dialog automatically 
 ### Linux (CUPS)
 ```bash
 sudo lpadmin -p MyPrinter -E \
-  -v ipp://<host-ip>:631/printers/USB-Printer \
+  -v ipp://${HOST_IP}:631/printers/USB-Printer \
   -m everywhere
 lpoptions -d MyPrinter
 ```
@@ -129,17 +135,17 @@ lpoptions -d MyPrinter
 ### Samba / Windows File Share
 | Platform | Path |
 |---|---|
-| Windows | `\\<host-ip>\scans` |
-| macOS   | `smb://<host-ip>/scans` |
+| Windows | `\\${HOST_IP}\scans` |
+| macOS   | `smb://${HOST_IP}/scans` |
 | Android | Connect via a file manager app |
 
 ### NFS (Linux/macOS)
 ```bash
 # macOS
-mount -t nfs <host-ip>:/data/scans /mnt/scans
+mount -t nfs ${HOST_IP}:/data/scans /mnt/scans
 
 # Linux
-sudo mount -t nfs <host-ip>:/data/scans /mnt/scans
+sudo mount -t nfs ${HOST_IP}:/data/scans /mnt/scans
 ```
 
 ---
@@ -418,16 +424,16 @@ make start
 
 | Service | URL / Address |
 |---------|---------------|
-| Scanner web UI | `http://<SERVER_IP>/` |
-| CUPS admin | `http://<SERVER_IP>:631/` |
-| Samba share | `\\<SERVER_IP>\Scans` |
-| NFS export | `<SERVER_IP>:/exports/scans` |
+| Scanner web UI | `http://${HOST_IP}/` |
+| CUPS admin | `http://${HOST_IP}:631/` |
+| Samba share | `\\${HOST_IP}\Scans` |
+| NFS export | `${HOST_IP}:/exports/scans` |
 
 ---
 
 ## Add Printer in CUPS
 
-1. Open `http://<SERVER_IP>:631/`
+1. Open `http://${HOST_IP}:631/`
 2. Administration → Add Printer → select your USB printer
 3. Choose driver (HPLIP for HP, Gutenprint for Epson/Canon, or upload PPD)
 4. Printer is now discoverable on the LAN via Bonjour/IPP
@@ -436,7 +442,7 @@ make start
 
 ## Scanner Web UI
 
-Open `http://<SERVER_IP>/` in any browser on the LAN.
+Open `http://${HOST_IP}/` in any browser on the LAN.
 - Choose resolution, colour mode, format (PDF / JPEG / PNG)
 - Click **Scan** → preview in browser → **Download**
 - Files auto-saved to shared folder (`/srv/printershare/scans`)
@@ -463,17 +469,17 @@ make test-rclone
 
 **Linux**
 ```bash
-bash clients/client-linux.sh <SERVER_IP>
+bash clients/client-linux.sh ${HOST_IP}
 ```
 
 **macOS**
 ```bash
-bash clients/client-macos.sh <SERVER_IP>
+bash clients/client-macos.sh ${HOST_IP}
 ```
 
 **Windows** — double-click or run as Administrator:
 ```
-client-windows.bat <SERVER_IP>
+client-windows.bat ${HOST_IP}
 ```
 
 ---
@@ -486,11 +492,11 @@ make install-usbip
 
 # Linux client
 sudo modprobe vhci-hcd
-usbip list -r <SERVER_IP>
-sudo usbip attach -r <SERVER_IP> -b <busid>
+usbip list -r ${HOST_IP}
+sudo usbip attach -r ${HOST_IP} -b <busid>
 
 # Windows — download usbip-win or usbipkit (GUI)
-# macOS   — bash clients/client-macos.sh <SERVER_IP> usbip
+# macOS   — bash clients/client-macos.sh ${HOST_IP} usbip
 ```
 
 ---
