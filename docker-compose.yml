@@ -81,6 +81,8 @@ services:
   cups:
     build:
       context: ./cups
+      args:
+        EXTRA_PACKAGES: ${CUPS_EXTRA_PACKAGES:-}
     container_name: ps-cups
     restart: unless-stopped
     network_mode: host

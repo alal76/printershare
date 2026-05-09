@@ -30,6 +30,7 @@ const ALLOWED_SETTINGS = new Set([
   'RCLONE_GDRIVE_REMOTE',
   'RCLONE_ONEDRIVE_REMOTE',
   'SCANS_HOST_PATH',
+  'CUPS_EXTRA_PACKAGES',
 ]);
 
 function isValidPort(raw) {

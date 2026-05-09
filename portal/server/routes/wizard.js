@@ -106,6 +106,187 @@ router.get('/prereqs', (_req, res) => {
   res.json(result);
 });
 
+// ─── Driver package maps ──────────────────────────────────────────────────
+// Packages that are NOT pre-installed in the cups/scanservjs images but may be
+// required for specific devices.  Pre-installed: hplip, gutenprint, foomatic-db.
+
+/** Extra apt packages needed in the CUPS container per printer make (lowercase). */
+const PRINT_PKG_MAP = {
+  epson:   ['printer-driver-escpr'],
+  brother: ['printer-driver-brlaser'],
+  samsung: ['printer-driver-splix'],
+  lexmark: ['printer-driver-foo2zjs'],
+  // hp, canon, ricoh, xerox — covered by pre-installed packages
+};
+
+/** Extra apt packages needed in the scanservjs container per scanner make (lowercase). */
+const SCAN_PKG_MAP = {
+  hp:      ['libsane-hpaio'],
+  epson:   ['libsane-epson2'],
+  brother: ['libsane-hpaio'],
+  // canon — sane-airscan already installed; escl covered
+};
+
+function printPackages(make) {
+  return PRINT_PKG_MAP[(make || '').toLowerCase()] || [];
+}
+function scanPackages(make) {
+  return SCAN_PKG_MAP[(make || '').toLowerCase()] || [];
+}
+
+// GET /api/v1/wizard/scan-devices — list SANE-visible scanners via scanimage -L
+router.get('/scan-devices', (_req, res) => {
+  try {
+    const raw = execSync('docker exec ps-scanservjs scanimage -L 2>&1', {
+      timeout: 20000, encoding: 'utf8',
+    });
+    // Each line: device `backend:path' is a <description>
+    const scanners = [];
+    for (const line of raw.split('\n')) {
+      const m = line.match(/^device [`']([^`']+)[`'] is a (.+)$/);
+      if (m) scanners.push({ device: m[1], description: m[2].trim() });
+    }
+    res.json({ scanners, raw: raw.trim() });
+  } catch (err) {
+    res.json({ scanners: [], raw: String(err.message) });
+  }
+});
+
+// GET /api/v1/wizard/driver-check — check printer + scanner driver availability
+// Query params: vidpid, make, print=1, scan=1
+router.get('/driver-check', (req, res) => {
+  const { vidpid = '', make = '', print: wantPrint = '0', scan: wantScan = '0' } = req.query;
+  const result = { vidpid, make, print: null, scan: null };
+
+  if (wantPrint === '1') {
+    result.print = checkPrintDriver(make);
+  }
+
+  if (wantScan === '1') {
+    result.scan = checkScanDriver(make, vidpid);
+  }
+
+  res.json(result);
+});
+
+function checkPrintDriver(make) {
+  try {
+    const lpinfo   = execSync('docker exec ps-cups lpinfo -m 2>&1', { timeout: 20000, encoding: 'utf8' });
+    const hasPpd   = lpinfo.toLowerCase().includes(make.toLowerCase());
+    const missing  = printPackages(make);
+    let detail;
+    if (hasPpd) detail = `PPD found for ${make} in CUPS`;
+    else if (missing.length) detail = `No PPD yet — will install: ${missing.join(', ')}`;
+    else detail = `No dedicated PPD for ${make} — generic driver will be used`;
+    return { ok: hasPpd || missing.length === 0, packages: missing, detail };
+  } catch (e) {
+    return { ok: false, packages: [], detail: String(e.message) };
+  }
+}
+
+function checkScanDriver(make, vidpid) {
+  try {
+    const saneList = execSync('docker exec ps-scanservjs scanimage -L 2>&1', { timeout: 15000, encoding: 'utf8' });
+    const found    = saneList.toLowerCase().includes(make.toLowerCase()) ||
+                     (vidpid && saneList.includes(vidpid.split(':')[0]));
+    const missing  = scanPackages(make);
+    let detail;
+    if (found) detail = 'Scanner found by SANE';
+    else if (missing.length) detail = `Scanner not visible to SANE — will install: ${missing.join(', ')}`;
+    else detail = 'Scanner not visible yet — try reconnecting USB after setup';
+    return { ok: found || missing.length === 0, packages: missing, detail };
+  } catch (e) {
+    return { ok: false, packages: [], detail: String(e.message) };
+  }
+}
+
+// POST /api/v1/wizard/driver-install — SSE streaming apt-get driver installation
+router.post('/driver-install', (req, res) => {
+  const { make = '', capabilities = [] } = req.body || {};
+  const caps = Array.isArray(capabilities) ? capabilities : String(capabilities).split(',');
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const tasks = [];
+  const printPkgs = caps.includes('print') ? printPackages(make) : [];
+  const scanPkgs  = caps.includes('scan')  ? scanPackages(make)  : [];
+
+  if (printPkgs.length) {
+    tasks.push({ container: 'ps-cups',       packages: printPkgs, label: 'print driver' });
+  }
+  if (scanPkgs.length) {
+    tasks.push({ container: 'ps-scanservjs', packages: scanPkgs,  label: 'scan driver'  });
+  }
+
+  if (!tasks.length) {
+    sendSse(res, 'log', 'All required drivers are already present — nothing to install.');
+    sendSse(res, 'complete', 'No installations needed');
+    res.end();
+    return;
+  }
+
+  // Persist print packages into wizard config so Review & Build can bake them into the image
+  persistExtraPackages(printPkgs);
+
+  // Run apt-get update once, then install each task in sequence
+  sendSse(res, 'log', '==> Updating package lists in ps-cups...');
+  const update = spawn('docker', ['exec', 'ps-cups', 'apt-get', 'update', '-qq'], {
+    env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' },
+  });
+  let updateErr = '';
+  update.stderr.on('data', d => { updateErr += d.toString(); });
+  update.on('error', () => runTasks(tasks, res));  // non-fatal
+  update.on('close', () => runTasks(tasks, res));
+
+  req.on('close', () => update.kill());
+});
+
+function runTasks(tasks, res) {
+  let idx = 0;
+  function next() {
+    if (idx >= tasks.length) {
+      sendSse(res, 'complete', 'Driver installation complete');
+      res.end();
+      return;
+    }
+    const { container, packages, label } = tasks[idx++];
+    sendSse(res, 'log', `==> Installing ${label} (${packages.join(' ')}) in ${container}...`);
+    const child = spawn('docker', [
+      'exec', container, 'apt-get', 'install', '-y', '--no-install-recommends', ...packages,
+    ], { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+    child.stdout.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
+    child.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
+    child.on('error', err => {
+      sendSse(res, 'error', `Spawn error: ${err.message}`);
+      res.end();
+    });
+    child.on('close', code => {
+      if (code !== 0) {
+        sendSse(res, 'error', `apt-get exited ${code} — check container logs`);
+        res.end();
+        return;
+      }
+      sendSse(res, 'log', `✓ ${label} installed`);
+      next();
+    });
+  }
+  next();
+}
+
+// Persist installed packages into wizard state so Review & Build can bake them in
+function persistExtraPackages(printPkgs) {
+  if (!printPkgs.length) return;
+  try {
+    const state = loadState();
+    const existing = (state.config.CUPS_EXTRA_PACKAGES || '').trim();
+    const merged   = [...new Set([...existing.split(' ').filter(Boolean), ...printPkgs])].join(' ');
+    state.config.CUPS_EXTRA_PACKAGES = merged;
+    saveState(state);
+  } catch { /* non-fatal */ }
+}
+
 /**
  * Map wizard provider names to rclone backend types and remote names.
  */

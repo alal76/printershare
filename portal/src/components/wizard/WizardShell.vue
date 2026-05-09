@@ -83,18 +83,20 @@ import Button from '@/components/ui/Button.vue'
 import { useSystemStore } from '@/stores/system'
 import { useToastStore }  from '@/stores/toast'
 
-import StepPrereqs    from './StepPrereqs.vue'
-import StepUsbDetect  from './StepUsbDetect.vue'
-import StepPasswords  from './StepPasswords.vue'
-import StepNetwork    from './StepNetwork.vue'
-import StepCloud      from './StepCloud.vue'
-import StepRcloneAuth from './StepRcloneAuth.vue'
-import StepRemote     from './StepRemote.vue'
-import StepConfirm    from './StepConfirm.vue'
+import StepPrereqs      from './StepPrereqs.vue'
+import StepUsbDetect    from './StepUsbDetect.vue'
+import StepDriverInstall from './StepDriverInstall.vue'
+import StepPasswords    from './StepPasswords.vue'
+import StepNetwork      from './StepNetwork.vue'
+import StepCloud        from './StepCloud.vue'
+import StepRcloneAuth   from './StepRcloneAuth.vue'
+import StepRemote       from './StepRemote.vue'
+import StepConfirm      from './StepConfirm.vue'
 
 const steps = [
   'Check Prerequisites',
-  'Detect USB Device',
+  'Detect Devices',
+  'Install Drivers',
   'Set Passwords',
   'Network Options',
   'Cloud Backup',
@@ -104,8 +106,8 @@ const steps = [
 ]
 
 const stepComponents = shallowRef([
-  StepPrereqs, StepUsbDetect, StepPasswords, StepNetwork, StepCloud,
-  StepRcloneAuth, StepRemote, StepConfirm,
+  StepPrereqs, StepUsbDetect, StepDriverInstall, StepPasswords, StepNetwork,
+  StepCloud, StepRcloneAuth, StepRemote, StepConfirm,
 ])
 
 const router   = useRouter()

@@ -1,91 +1,186 @@
 <template>
-  <div class="space-y-4">
+  <div class="space-y-5">
     <h3 class="font-semibold text-gray-900">
-      Detect USB Device
+      Detect Devices
     </h3>
     <p class="text-sm text-gray-500">
-      Connect your USB printer or scanner then click Scan.
+      Connect your USB printer and/or scanner, then click the scan buttons below.
     </p>
 
-    <button
-      type="button"
-      class="btn-secondary text-sm"
-      :disabled="scanning"
-      @click="scan"
-    >
-      <Loader2Icon
-        v-if="scanning"
-        class="w-4 h-4 animate-spin"
-      />
-      <UsbIcon
-        v-else
-        class="w-4 h-4"
-      />
-      {{ scanning ? 'Scanning…' : 'Scan USB Devices' }}
-    </button>
+    <!-- ── Printer (USB) section ──────────────────────────────────── -->
+    <section class="space-y-2">
+      <div class="flex items-center justify-between">
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Printers
+        </h4>
+        <button
+          type="button"
+          class="btn-secondary text-xs py-1 px-3"
+          :disabled="scanningUsb"
+          @click="scanUsb"
+        >
+          <Loader2Icon
+            v-if="scanningUsb"
+            class="w-3 h-3 animate-spin"
+          />
+          <UsbIcon
+            v-else
+            class="w-3 h-3"
+          />
+          {{ scanningUsb ? 'Scanning…' : 'Scan USB' }}
+        </button>
+      </div>
 
-    <div
-      v-if="devices.length === 0 && !scanning"
-      class="text-sm text-gray-400 text-center py-6 border border-dashed rounded-xl"
-    >
-      No USB devices detected yet
-    </div>
+      <div
+        v-if="printers.length === 0 && !scanningUsb"
+        class="text-sm text-gray-400 text-center py-4 border border-dashed rounded-xl"
+      >
+        No printers detected yet
+      </div>
 
-    <div
-      v-if="devices.length > 0"
-      class="grid gap-2"
-    >
       <button
-        v-for="d in devices"
+        v-for="d in printers"
         :key="d.vidpid"
         type="button"
-        class="flex items-center gap-3 p-3 rounded-xl border text-left transition-colors"
-        :class="selected?.vidpid === d.vidpid ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-primary-200'"
-        @click="select(d)"
+        class="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors"
+        :class="selectedPrinter?.vidpid === d.vidpid
+          ? 'border-primary-500 bg-primary-50'
+          : 'border-gray-200 hover:border-primary-200'"
+        @click="selectPrinter(d)"
       >
-        <UsbIcon class="w-5 h-5 text-gray-400 flex-shrink-0" />
-        <div class="flex-1">
-          <p class="text-sm font-medium text-gray-900">
+        <PrinterIcon class="w-5 h-5 text-gray-400 flex-shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">
             {{ d.name }}
           </p>
           <p class="text-xs text-gray-500">
-            {{ d.vidpid }}
+            {{ d.vidpid }}{{ d.make ? ` · ${d.make}` : '' }}
           </p>
         </div>
-        <div class="flex gap-1">
-          <span
-            v-if="d.capabilities.print"
-            class="text-xs bg-blue-50 text-blue-600 rounded px-1.5 py-0.5"
-          >Print</span>
-          <span
-            v-if="d.capabilities.scan"
-            class="text-xs bg-green-50 text-green-600 rounded px-1.5 py-0.5"
-          >Scan</span>
+        <div class="flex gap-1 flex-shrink-0">
           <span
             v-if="d.capabilities.escl"
             class="text-xs bg-purple-50 text-purple-600 rounded px-1.5 py-0.5"
-          >AirScan</span>
+          >AirPrint</span>
         </div>
       </button>
-    </div>
+    </section>
 
-    <p
-      v-if="!selected && !scanning"
-      class="text-xs text-amber-600"
-    >
-      Select a device to continue (or skip if not connected).
+    <!-- ── Scanner section ────────────────────────────────────────── -->
+    <section class="space-y-2">
+      <div class="flex items-center justify-between">
+        <h4 class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Scanners
+        </h4>
+        <button
+          type="button"
+          class="btn-secondary text-xs py-1 px-3"
+          :disabled="scanningUsb || scanningScanner"
+          @click="scanScanners"
+        >
+          <Loader2Icon
+            v-if="scanningScanner"
+            class="w-3 h-3 animate-spin"
+          />
+          <ScanIcon
+            v-else
+            class="w-3 h-3"
+          />
+          {{ scanningScanner ? 'Scanning…' : 'Scan SANE' }}
+        </button>
+      </div>
+
+      <!-- USB-detected scanners -->
+      <button
+        v-for="d in usbScanners"
+        :key="d.vidpid"
+        type="button"
+        class="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors"
+        :class="selectedScanner?.id === d.vidpid
+          ? 'border-primary-500 bg-primary-50'
+          : 'border-gray-200 hover:border-primary-200'"
+        @click="selectScanner({ id: d.vidpid, description: d.name, source: 'usb', device: d })"
+      >
+        <ScanIcon class="w-5 h-5 text-gray-400 flex-shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">
+            {{ d.name }}
+          </p>
+          <p class="text-xs text-gray-500">
+            {{ d.vidpid }} · USB
+          </p>
+        </div>
+        <span class="text-xs bg-gray-100 text-gray-500 rounded px-1.5 py-0.5 flex-shrink-0">USB</span>
+      </button>
+
+      <!-- SANE-detected scanners -->
+      <button
+        v-for="s in saneDevices"
+        :key="s.device"
+        type="button"
+        class="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-colors"
+        :class="selectedScanner?.id === s.device
+          ? 'border-primary-500 bg-primary-50'
+          : 'border-gray-200 hover:border-primary-200'"
+        @click="selectScanner({ id: s.device, description: s.description, source: 'sane' })"
+      >
+        <ScanIcon class="w-5 h-5 text-gray-400 flex-shrink-0" />
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">
+            {{ s.description }}
+          </p>
+          <p class="text-xs text-gray-500">
+            {{ s.device }}
+          </p>
+        </div>
+        <span class="text-xs bg-green-50 text-green-600 rounded px-1.5 py-0.5 flex-shrink-0">SANE</span>
+      </button>
+
+      <div
+        v-if="usbScanners.length === 0 && saneDevices.length === 0 && !scanningScanner && !scanningUsb"
+        class="text-sm text-gray-400 text-center py-4 border border-dashed rounded-xl"
+      >
+        No scanners detected yet — click "Scan SANE" after connecting scanner
+      </div>
+    </section>
+
+    <p class="text-xs text-amber-600">
+      <span v-if="!selectedPrinter && !selectedScanner">
+        Select at least one device, or
+      </span>
+      <button
+        type="button"
+        class="underline"
+        @click="skip"
+      >
+        skip (no device connected)
+      </button>
     </p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref }          from 'vue'
-import { UsbIcon, Loader2Icon } from 'lucide-vue-next'
+import { ref, computed } from 'vue'
+import { UsbIcon, ScanIcon, PrinterIcon, Loader2Icon } from 'lucide-vue-next'
 
 interface UsbDevice {
   vidpid: string
   name:   string
+  make:   string
+  model:  string
   capabilities: { print: boolean; scan: boolean; fax: boolean; escl: boolean }
+}
+
+interface SaneDevice {
+  device:      string
+  description: string
+}
+
+interface SelectedScanner {
+  id:          string
+  description: string
+  source:      'usb' | 'sane'
+  device?:     UsbDevice
 }
 
 const props = defineProps<{ config: Record<string, string> }>()
@@ -94,24 +189,88 @@ const emit  = defineEmits<{
   (e: 'valid', v: boolean): void
 }>()
 
-const scanning = ref(false)
-const devices  = ref<UsbDevice[]>([])
-const selected = ref<UsbDevice | null>(null)
+const scanningUsb     = ref(false)
+const scanningScanner = ref(false)
+const allUsbDevices   = ref<UsbDevice[]>([])
+const saneDevices     = ref<SaneDevice[]>([])
+const selectedPrinter = ref<UsbDevice | null>(null)
+const selectedScanner = ref<SelectedScanner | null>(null)
 
-async function scan() {
-  scanning.value = true
+const printers    = computed(() => allUsbDevices.value.filter(d => d.capabilities.print))
+const usbScanners = computed(() => allUsbDevices.value.filter(d => d.capabilities.scan && !d.capabilities.print))
+
+async function scanUsb() {
+  scanningUsb.value = true
   try {
     const r = await fetch('/api/v1/system/usb')
-    const d = await r.json()
-    devices.value = d.devices ?? []
+    const d = await r.json() as { devices: UsbDevice[] }
+    allUsbDevices.value = d.devices ?? []
+    // Auto-select if only one printer found
+    if (printers.value.length === 1 && !selectedPrinter.value) {
+      selectPrinter(printers.value[0])
+    }
+    // Also auto-detect SANE if not done yet
+    if (saneDevices.value.length === 0) scanScanners()
   } finally {
-    scanning.value = false
+    scanningUsb.value = false
   }
 }
 
-function select(d: UsbDevice) {
-  selected.value = d
-  emit('update:config', { ...props.config, USB_VID: d.vidpid.split(':')[0], USB_PID: d.vidpid.split(':')[1] })
+async function scanScanners() {
+  scanningScanner.value = true
+  try {
+    const r = await fetch('/api/v1/wizard/scan-devices')
+    const d = await r.json() as { scanners: SaneDevice[] }
+    saneDevices.value = d.scanners ?? []
+    if (saneDevices.value.length === 1 && !selectedScanner.value) {
+      selectScanner({ id: saneDevices.value[0].device, description: saneDevices.value[0].description, source: 'sane' })
+    }
+  } finally {
+    scanningScanner.value = false
+  }
+}
+
+function selectPrinter(d: UsbDevice) {
+  selectedPrinter.value = d
+  pushConfig()
+}
+
+function selectScanner(s: SelectedScanner) {
+  selectedScanner.value = s
+  pushConfig()
+}
+
+function pushConfig() {
+  const patch: Record<string, string> = { ...props.config }
+
+  if (selectedPrinter.value) {
+    const p = selectedPrinter.value
+    patch.USB_VID      = p.vidpid.split(':')[0]
+    patch.USB_PID      = p.vidpid.split(':')[1]
+    patch.DETECTED_MAKE = p.make || ''
+    patch.DETECTED_CAPS = [
+      p.capabilities.print ? 'print' : '',
+      p.capabilities.scan  ? 'scan'  : '',
+      p.capabilities.escl  ? 'escl'  : '',
+    ].filter(Boolean).join(',')
+  }
+
+  if (selectedScanner.value) {
+    patch.SCANNER_DEVICE = selectedScanner.value.id
+    if (!patch.DETECTED_MAKE && selectedScanner.value.device?.make) {
+      patch.DETECTED_MAKE = selectedScanner.value.device.make
+    }
+    if (!patch.DETECTED_CAPS) {
+      patch.DETECTED_CAPS = 'scan'
+    }
+  }
+
+  emit('update:config', patch)
+  emit('valid', true)
+}
+
+function skip() {
   emit('valid', true)
 }
 </script>
+

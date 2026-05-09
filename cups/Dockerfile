@@ -4,12 +4,18 @@ LABEL description="CUPS print server with AirPrint/Mopria (IPP Everywhere) for U
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Optional extra packages injected by the wizard (e.g. printer-driver-escpr)
+ARG EXTRA_PACKAGES=""
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     cups cups-bsd cups-filters cups-pdf cups-ipp-utils \
     foomatic-db-compressed-ppds foomatic-db-engine \
     printer-driver-gutenprint hplip \
     avahi-daemon avahi-utils dbus libnss-mdns \
     ca-certificates curl wget \
+    && if [ -n "$EXTRA_PACKAGES" ]; then \
+         apt-get install -y --no-install-recommends $EXTRA_PACKAGES; \
+       fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY cupsd.conf /etc/cups/cupsd.conf
