@@ -46,11 +46,12 @@ services:
     networks:
       - ps-network
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./.env:/config/.env
       - ./docker-compose.yml:/config/docker-compose.yml:ro
       - ${SCANS_HOST_PATH:-/srv/printershare/scans}:/scans:ro
       - portal-data:/app/data
+      - rclone-config:/root/.config/rclone
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:

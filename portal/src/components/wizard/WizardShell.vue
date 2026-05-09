@@ -83,13 +83,14 @@ import Button from '@/components/ui/Button.vue'
 import { useSystemStore } from '@/stores/system'
 import { useToastStore }  from '@/stores/toast'
 
-import StepPrereqs  from './StepPrereqs.vue'
-import StepUsbDetect from './StepUsbDetect.vue'
-import StepPasswords from './StepPasswords.vue'
-import StepNetwork   from './StepNetwork.vue'
-import StepCloud     from './StepCloud.vue'
-import StepRemote    from './StepRemote.vue'
-import StepConfirm   from './StepConfirm.vue'
+import StepPrereqs    from './StepPrereqs.vue'
+import StepUsbDetect  from './StepUsbDetect.vue'
+import StepPasswords  from './StepPasswords.vue'
+import StepNetwork    from './StepNetwork.vue'
+import StepCloud      from './StepCloud.vue'
+import StepRcloneAuth from './StepRcloneAuth.vue'
+import StepRemote     from './StepRemote.vue'
+import StepConfirm    from './StepConfirm.vue'
 
 const steps = [
   'Check Prerequisites',
@@ -97,12 +98,14 @@ const steps = [
   'Set Passwords',
   'Network Options',
   'Cloud Backup',
+  'Authenticate Cloud',
   'Remote Access',
   'Review & Build',
 ]
 
 const stepComponents = shallowRef([
-  StepPrereqs, StepUsbDetect, StepPasswords, StepNetwork, StepCloud, StepRemote, StepConfirm,
+  StepPrereqs, StepUsbDetect, StepPasswords, StepNetwork, StepCloud,
+  StepRcloneAuth, StepRemote, StepConfirm,
 ])
 
 const router   = useRouter()

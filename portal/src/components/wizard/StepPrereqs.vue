@@ -65,10 +65,12 @@ interface Check {
 const emit = defineEmits<{ (e: 'valid', v: boolean): void }>()
 
 const checks = ref<Check[]>([
-  { id: 'health',  label: 'Portal server reachable',  detail: '', state: 'pending' },
-  { id: 'docker',  label: 'Docker socket available',  detail: '', state: 'pending' },
+  { id: 'health',  label: 'Portal server reachable',   detail: '', state: 'pending' },
+  { id: 'docker',  label: 'Docker socket available',   detail: '', state: 'pending' },
+  { id: 'compose', label: 'Docker Compose plugin',     detail: '', state: 'pending' },
   { id: 'cups',    label: 'CUPS service reachable',    detail: '', state: 'pending' },
-  { id: 'scanner', label: 'ScanServJS reachable',       detail: '', state: 'pending' },
+  { id: 'scanner', label: 'ScanServJS reachable',      detail: '', state: 'pending' },
+  { id: 'rclone',  label: 'rclone installed',          detail: '(needed for cloud backup)', state: 'pending' },
 ])
 
 const hasError = computed(() => checks.value.some(c => c.state === 'error'))
@@ -79,22 +81,44 @@ function checkBorder(state: CheckState) {
 
 onMounted(async () => {
   try {
+    // Health + service checks
     const r = await fetch('/api/v1/health')
     const data = await r.json()
     updateCheck('health', 'ok', 'Connected')
+    updateCheck('docker', 'ok', 'Portal running')
     const svcs = data.services ?? {}
-    updateCheck('docker',  'ok', 'Portal running')
-    updateCheck('cups',    svcs.cups?.status     === 'ok' ? 'ok' : 'error', svcs.cups?.message    ?? '')
+    updateCheck('cups',    svcs.cups?.status      === 'ok' ? 'ok' : 'error', svcs.cups?.message     ?? '')
     updateCheck('scanner', svcs.scanservjs?.status === 'ok' ? 'ok' : 'error', svcs.scanservjs?.message ?? '')
   } catch {
     for (const c of checks.value) { c.state = 'error'; c.detail = 'Could not reach portal API' }
+    emit('valid', false)
+    return
   }
-  emit('valid', !hasError.value)
+
+  // Tool availability checks (docker compose + rclone)
+  try {
+    const r2 = await fetch('/api/v1/wizard/prereqs')
+    const tools = await r2.json() as Record<string, { ok: boolean; detail?: string }>
+    updateCheck('compose', tools.dockerCompose?.ok ? 'ok' : 'error', tools.dockerCompose?.detail ?? '')
+    // rclone is optional (warn only, don't block)
+    if (tools.rclone?.ok) {
+      updateCheck('rclone', 'ok', tools.rclone.detail ?? 'installed')
+    } else {
+      const c = checks.value.find(x => x.id === 'rclone')
+      if (c) { c.state = 'error'; c.detail = 'Not found — will be missing from the portal container (rebuild required)' }
+    }
+  } catch {
+    updateCheck('compose', 'error', 'Could not reach prereqs API')
+    updateCheck('rclone',  'error', 'Could not reach prereqs API')
+  }
+
+  // rclone missing blocks wizard only if the compose check also fails; otherwise warn
+  const blockingError = checks.value.some(c => c.state === 'error' && c.id !== 'rclone')
+  emit('valid', !blockingError)
 })
 
 function updateCheck(id: string, state: CheckState, detail: string) {
   const c = checks.value.find(x => x.id === id)
   if (c) { c.state = state; c.detail = detail }
-  emit('valid', !hasError.value)
 }
 </script>

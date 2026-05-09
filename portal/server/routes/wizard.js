@@ -4,23 +4,20 @@
  * @module routes/wizard
  * @description Setup-wizard REST endpoints.
  *
- * GET  /api/v1/wizard/state    – Returns the persisted wizard state
- *                                ({step, completed, config}).
- * POST /api/v1/wizard/state    – Advances the wizard to a new step and
- *                                merges partial config values.
- * POST /api/v1/wizard/build    – Writes the collected config to the .env file
- *                                then spawns `docker compose up --build -d`.
- *                                The response is an SSE stream so the browser
- *                                can display live build output.
- * POST /api/v1/wizard/reset    – Clears the persisted state (re-run wizard).
+ * GET  /api/v1/wizard/state       – Returns the persisted wizard state
+ * POST /api/v1/wizard/state       – Advances the wizard step and merges config
+ * GET  /api/v1/wizard/prereqs     – Checks docker compose + rclone availability
+ * POST /api/v1/wizard/rclone-auth – Creates an rclone remote from a pasted token or S3 keys
+ * POST /api/v1/wizard/build       – Writes .env and streams docker compose up via SSE
+ * POST /api/v1/wizard/reset       – Clears persisted state
  */
 
 const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
-const { spawn } = require('node:child_process');
+const os     = require('node:os');
+const { spawn, execSync } = require('node:child_process');
 const { sanitizePatch } = require('./settings');
-/* env.js imported when wizard needs to write settings */
 
 const DATA_DIR   = process.env.PORTAL_DATA_DIR || '/app/data';
 const STATE_FILE = path.join(DATA_DIR, 'wizard-state.json');
@@ -87,7 +84,85 @@ function sendSse(res, type, data) {
   res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
 }
 
-// POST /api/v1/wizard/build — stream docker compose up output via SSE
+// GET /api/v1/wizard/prereqs — check required tools are available in the container
+router.get('/prereqs', (_req, res) => {
+  const result = {};
+
+  try {
+    const ver = execSync('docker compose version 2>&1', { timeout: 5000, encoding: 'utf8' }).trim();
+    result.dockerCompose = { ok: true, detail: ver.split('\n')[0] };
+  } catch {
+    result.dockerCompose = { ok: false, detail: 'docker compose plugin not found' };
+  }
+
+  try {
+    const ver = execSync('rclone version 2>&1', { timeout: 5000, encoding: 'utf8' })
+      .trim().split('\n')[0];
+    result.rclone = { ok: true, detail: ver };
+  } catch {
+    result.rclone = { ok: false, detail: 'rclone not installed' };
+  }
+
+  res.json(result);
+});
+
+/**
+ * Map wizard provider names to rclone backend types and remote names.
+ */
+const PROVIDER_TYPE = { dropbox: 'dropbox', gdrive: 'drive', onedrive: 'onedrive', s3: 's3' };
+const PROVIDER_REMOTE = { dropbox: 'dropbox', gdrive: 'gdrive', onedrive: 'onedrive', s3: 's3' };
+
+// POST /api/v1/wizard/rclone-auth — create rclone remote from pasted token or S3 credentials
+router.post('/rclone-auth', (req, res) => {
+  const { provider, token, s3Config } = req.body || {};
+
+  if (!provider) return res.status(400).json({ error: 'provider required' });
+
+  const rcloneType = PROVIDER_TYPE[provider];
+  const remoteName = PROVIDER_REMOTE[provider];
+  if (!rcloneType) return res.status(400).json({ error: `Unknown provider: ${provider}` });
+
+  let args;
+  if (provider === 's3') {
+    const { accessKeyId = '', secretAccessKey = '', region = 'us-east-1' } = s3Config || {};
+    if (!accessKeyId || !secretAccessKey) {
+      return res.status(400).json({ error: 'accessKeyId and secretAccessKey required for S3' });
+    }
+    args = [
+      'config', 'create', remoteName, 's3',
+      'provider=AWS',
+      `access_key_id=${accessKeyId}`,
+      `secret_access_key=${secretAccessKey}`,
+      `region=${region}`,
+    ];
+  } else {
+    if (!token) return res.status(400).json({ error: 'token required for OAuth providers' });
+    args = ['config', 'create', remoteName, rcloneType, `token=${token}`];
+  }
+
+  const child = spawn('rclone', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  child.stdout.on('data', d => { out += d.toString(); });
+  child.stderr.on('data', d => { out += d.toString(); });
+  child.on('error', err => {
+    if (!res.headersSent) res.status(500).json({ error: `Spawn error: ${err.message}` });
+  });
+  child.on('close', code => {
+    if (code !== 0) {
+      return res.status(500).json({ error: `rclone config create exited ${code}`, detail: out.trim() });
+    }
+    // Verify the remote was registered
+    try {
+      const remotes = execSync('rclone listremotes 2>&1', { timeout: 5000, encoding: 'utf8' });
+      if (!remotes.includes(`${remoteName}:`)) {
+        return res.status(500).json({ error: 'Remote was not saved to config', detail: out.trim() });
+      }
+    } catch { /* listremotes failure is non-fatal */ }
+    res.json({ ok: true, remote: remoteName });
+  });
+});
+
+
 router.post('/build', (req, res) => {
   const { config } = req.body || {};
   const dotenvPath  = process.env.DOTENV_PATH  || '/config/.env';
@@ -115,6 +190,11 @@ router.post('/build', (req, res) => {
 
   child.stdout.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
   child.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
+
+  child.on('error', err => {
+    sendSse(res, 'error', `Spawn error: ${err.message}`);
+    res.end();
+  });
 
   child.on('close', code => {
     if (code === 0) {

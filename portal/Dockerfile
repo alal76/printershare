@@ -8,11 +8,17 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# ── Stage 2: Runtime ───────────────────────────────────────────────────────────
+# ── Stage 2: Pull docker+compose binaries from official image ──────────────────
+FROM docker:27-cli AS docker-tools
+
+# ── Stage 3: Runtime ───────────────────────────────────────────────────────────
 FROM node:20-alpine
 
-# Docker CLI for compose commands and log streaming
-RUN apk add --no-cache docker-cli curl
+# Docker CLI + Compose plugin (copied from official docker:cli image)
+COPY --from=docker-tools /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-tools /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+
+RUN apk add --no-cache curl rclone
 
 WORKDIR /app
 
