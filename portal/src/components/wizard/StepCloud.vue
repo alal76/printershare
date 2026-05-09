@@ -4,7 +4,7 @@
       Cloud Backup (Optional)
     </h3>
     <p class="text-sm text-gray-500">
-      Enable automatic scan backup to Dropbox, Google Drive, or S3.
+      Enable automatic scan backup to Dropbox, Google Drive, OneDrive, or S3.
     </p>
 
     <div class="flex items-center gap-3">
@@ -41,6 +41,9 @@
           </option>
           <option value="gdrive">
             Google Drive
+          </option>
+          <option value="onedrive">
+            OneDrive
           </option>
           <option value="s3">
             Amazon S3
