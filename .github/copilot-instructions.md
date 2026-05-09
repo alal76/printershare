@@ -90,3 +90,19 @@ Current cloud backup keys: `RCLONE_GDRIVE_REMOTE`, `RCLONE_ONEDRIVE_REMOTE`.
 - Pin new npm dependencies to an exact version (`--save-exact`).
 - Pin new Docker base images to an immutable digest (`@sha256:...`).
 - Do not introduce new dependencies without user approval for production code.
+
+---
+
+## 9. Deployment
+
+- The deploy target is a Docker host at **192.168.0.36** (SSH user `alal`).
+- **Always deploy via `git pull`** on the remote, never via `rsync`, `scp`, or any
+  other file copy. The canonical procedure is:
+  1. Commit and push all changes to `origin/main` from the workstation.
+  2. SSH to the remote and run `cd ~/printershare && ./scripts/deploy.sh`
+     (which runs `git pull --ff-only`, builds the portal, and restarts the stack).
+- If the remote working tree is not yet a git clone, bootstrap it once with
+  `git init && git remote add origin <url> && git fetch && git reset --hard origin/main`
+  inside `~/printershare` — preserving the existing `.env` and any data files.
+  After bootstrap, all future deploys use `./scripts/deploy.sh`.
+- Never edit files on the remote directly; all changes flow through git.
