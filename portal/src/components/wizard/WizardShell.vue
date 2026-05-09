@@ -42,6 +42,7 @@
         <component
           :is="stepComponents[currentStep]"
           v-model:config="config"
+          :build-logs="buildLogs"
           @valid="isValid = $event"
         />
       </div>
@@ -111,6 +112,7 @@ const currentStep = ref(0)
 const isValid  = ref(true)
 const building = ref(false)
 const config   = ref<Record<string, string>>({})
+const buildLogs = ref<string[]>([])
 
 function stepDotClass(i: number) {
   if (i < currentStep.value) return 'bg-white text-primary-600'
@@ -147,10 +149,12 @@ function parseSseChunk(chunk: string): BuildEvent | null {
 
 function handleBuildEvent(evt: BuildEvent): boolean {
   if (evt.type === 'log' && evt.data) {
-    toast.info('Build progress', evt.data)
+    buildLogs.value.push(evt.data)
   }
   if (evt.type === 'error') {
-    throw new Error(evt.data || 'Build failed')
+    buildLogs.value.push(`ERROR: ${evt.data ?? 'Build failed'}`)
+    const tail = buildLogs.value.slice(-30).join('\n')
+    throw new Error(tail)
   }
   return evt.type === 'complete'
 }
@@ -180,6 +184,7 @@ async function consumeBuildStream(reader: ReadableStreamDefaultReader<Uint8Array
 
 async function finish() {
   building.value = true
+  buildLogs.value = []
   try {
     const r = await fetch('/api/v1/wizard/build', {
       method:  'POST',
@@ -200,7 +205,9 @@ async function finish() {
     await router.push('/dashboard')
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)
-    toast.error('Build failed', msg)
+    // Show a short summary in the toast; full log is visible in the panel below
+    const summary = msg.split('\n').slice(-3).join(' | ')
+    toast.error('Build failed', summary)
   } finally {
     building.value = false
   }

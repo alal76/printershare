@@ -20,13 +20,15 @@
 
     <!-- Build log stream (shown during build) -->
     <div
-      v-if="logs.length > 0"
+      v-if="buildLogs.length > 0"
+      ref="logPanel"
       class="bg-black rounded-xl p-4 max-h-64 overflow-y-auto"
     >
       <p
-        v-for="(l, i) in logs"
+        v-for="(l, i) in buildLogs"
         :key="i"
-        class="text-xs text-green-400 font-mono whitespace-pre-wrap"
+        class="text-xs font-mono whitespace-pre-wrap"
+        :class="l.startsWith('ERROR') ? 'text-red-400' : 'text-green-400'"
       >
         {{ l }}
       </p>
@@ -35,12 +37,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, watch, nextTick, onMounted } from 'vue'
 
-const props = defineProps<{ config: Record<string, string> }>()
+const props = defineProps<{
+  config: Record<string, string>
+  buildLogs?: string[]
+}>()
 const emit  = defineEmits<{ (e: 'valid', v: boolean): void }>()
 
-const logs = ref<string[]>([])
+const logPanel = ref<HTMLElement | null>(null)
+const buildLogs = computed(() => props.buildLogs ?? [])
+
+watch(buildLogs, async () => {
+  await nextTick()
+  if (logPanel.value) {
+    logPanel.value.scrollTop = logPanel.value.scrollHeight
+  }
+}, { deep: true })
 
 const REDACT = new Set(['SAMBA_PASS', 'PORTAL_SECRET', 'TAILSCALE_AUTH_KEY', 'CLOUDFLARE_TUNNEL_TOKEN'])
 
