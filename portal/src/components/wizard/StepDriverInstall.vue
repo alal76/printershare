@@ -132,7 +132,8 @@ interface CheckRow {
 const props = defineProps<{ config: Record<string, string> }>()
 const emit  = defineEmits<{ (e: 'valid', v: boolean): void }>()
 
-const hasDevice   = computed(() => !!(props.config.USB_VID || props.config.SCANNER_DEVICE))
+const hasDevice   = computed(() => !!(props.config.USB_VID || props.config.SCANNER_DEVICE || props.config.VIRTUAL_PRINTER))
+const isVirtual   = computed(() => !!props.config.VIRTUAL_PRINTER)
 const make        = computed(() => props.config.DETECTED_MAKE || '')
 const vidpid      = computed(() => props.config.USB_VID && props.config.USB_PID
   ? `${props.config.USB_VID}:${props.config.USB_PID}` : '')
@@ -158,12 +159,19 @@ function rowBorder(row: CheckRow) {
   }[row.state]
 }
 
-async function checkDrivers() {
-  if (!hasDevice.value) { emit('valid', true); return }
+function checkVirtualDriver() {
+  const label = make.value === 'Virtual-PDF' ? 'PDF printer (printer-driver-cups-pdf)' : 'XPS printer (ghostscript)'
+  const pkgs  = make.value === 'Virtual-PDF' ? 'printer-driver-cups-pdf' : 'printer-driver-cups-pdf, ghostscript'
+  checkRows.value = [{
+    type:   'print',
+    label,
+    state:  'warn',
+    detail: `Will install: ${pkgs} and create CUPS queue`,
+  }]
+  checking.value = false
+}
 
-  checking.value = true
-  checkRows.value = []
-
+async function checkPhysicalDrivers() {
   if (wantPrint.value) checkRows.value.push({ type: 'print', label: 'Print driver', state: 'pending', detail: '' })
   if (wantScan.value)  checkRows.value.push({ type: 'scan',  label: 'Scan driver',  state: 'pending', detail: '' })
 
@@ -179,7 +187,6 @@ async function checkDrivers() {
   try {
     const r    = await fetch(`/api/v1/wizard/driver-check?${params}`)
     const data = await r.json() as { print?: DriverResult | null; scan?: DriverResult | null }
-
     updateRow('print', data.print)
     updateRow('scan',  data.scan)
   } catch (err) {
@@ -191,6 +198,14 @@ async function checkDrivers() {
     checking.value = false
     if (!hasMissing.value) emit('valid', true)
   }
+}
+
+async function checkDrivers() {
+  if (!hasDevice.value) { emit('valid', true); return }
+  checking.value = true
+  checkRows.value = []
+  if (isVirtual.value) { checkVirtualDriver(); return }
+  await checkPhysicalDrivers()
 }
 
 function updateRow(type: 'print' | 'scan', result?: DriverResult | null) {

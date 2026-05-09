@@ -212,6 +212,11 @@ router.post('/driver-install', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
+  // Virtual printer path — install packages then create CUPS queue
+  if (make === 'Virtual-PDF' || make === 'Virtual-XPS') {
+    return installVirtualPrinter(make, res);
+  }
+
   const tasks = [];
   const printPkgs = caps.includes('print') ? printPackages(make) : [];
   const scanPkgs  = caps.includes('scan')  ? scanPackages(make)  : [];
@@ -243,6 +248,97 @@ router.post('/driver-install', (req, res) => {
 
   req.on('close', () => update.kill());
 });
+
+/**
+ * Install a virtual (software-only) CUPS printer — either PDF or XPS.
+ *
+ * PDF:  installs cups-pdf, registers a "Virtual-PDF" CUPS queue backed by cups-pdf.
+ * XPS:  installs cups-pdf + ghostscript, registers a "Virtual-XPS" CUPS queue;
+ *       a PostProcessing hook converts each PDF output to XPS via ghostscript xpswrite.
+ */
+function installVirtualPrinter(make, res) {
+  const isPdf    = make === 'Virtual-PDF';
+  const queueName = isPdf ? 'Virtual-PDF' : 'Virtual-XPS';
+  const packages  = isPdf ? ['printer-driver-cups-pdf'] : ['printer-driver-cups-pdf', 'ghostscript'];
+  const label     = isPdf ? 'PDF' : 'XPS';
+
+  sendSse(res, 'log', `==> Installing ${label} virtual printer packages (${packages.join(', ')}) in ps-cups...`);
+
+  const update = spawn('docker', ['exec', 'ps-cups', 'apt-get', 'update', '-qq'], {
+    env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' },
+  });
+  update.on('error', () => doInstallVirtual(packages, queueName, isPdf, res));
+  update.on('close', () => doInstallVirtual(packages, queueName, isPdf, res));
+}
+
+function doInstallVirtual(packages, queueName, isPdf, res) {
+  const install = spawn('docker', [
+    'exec', 'ps-cups', 'apt-get', 'install', '-y', '--no-install-recommends', ...packages,
+  ], { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+
+  install.stdout.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
+  install.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
+  install.on('error', err => { sendSse(res, 'error', `Install error: ${err.message}`); res.end(); });
+  install.on('close', code => {
+    if (code !== 0) {
+      sendSse(res, 'error', `apt-get exited ${code} — check container logs`);
+      res.end();
+      return;
+    }
+    sendSse(res, 'log', `✓ Packages installed`);
+    if (isPdf) {
+      setupPdfQueue(queueName, res);
+    } else {
+      setupXpsQueue(queueName, res);
+    }
+  });
+}
+
+function setupPdfQueue(queueName, res) {
+  sendSse(res, 'log', `==> Registering ${queueName} CUPS queue...`);
+  const lpadmin = spawn('docker', [
+    'exec', 'ps-cups',
+    'lpadmin', '-p', queueName, '-E', '-v', 'cups-pdf:/', '-P', '/usr/share/ppd/cups-pdf/CUPS-PDF_opt.ppd',
+    '-o', 'printer-is-shared=true',
+  ]);
+  lpadmin.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
+  lpadmin.on('close', code => {
+    if (code !== 0) { sendSse(res, 'error', `lpadmin exited ${code}`); res.end(); return; }
+    sendSse(res, 'log', `✓ ${queueName} CUPS queue created — output: /var/spool/cups-pdf/ANONYMOUS/`);
+    sendSse(res, 'complete', `${queueName} printer ready`);
+    res.end();
+  });
+}
+
+function setupXpsQueue(queueName, res) {
+  sendSse(res, 'log', `==> Configuring XPS output directory and post-processing hook...`);
+
+  // Write a PostProcessing script that converts PDF→XPS for the Virtual-XPS queue
+  const postScript = [
+    '#!/bin/sh',
+    '# Called by cups-pdf after each job. $1=PDF path, $CUPS_PRINTER=queue name',
+    `[ "$CUPS_PRINTER" = "${queueName}" ] || exit 0`,
+    'OUTDIR=/var/spool/xps-printer/ANONYMOUS',
+    'mkdir -p "$OUTDIR"',
+    'OUT="$OUTDIR/$(basename "${1%.pdf}").xps"',
+    'gs -dNOPAUSE -dBATCH -sDEVICE=xpswrite -sOutputFile="$OUT" "$1" 2>/dev/null && rm -f "$1"',
+  ].join('\n');
+
+  const writeScript = spawn('docker', [
+    'exec', 'ps-cups', 'sh', '-c',
+    `printf '%s\n' ${JSON.stringify(postScript)} > /usr/local/bin/cups-pdf-xps.sh && chmod +x /usr/local/bin/cups-pdf-xps.sh`,
+  ]);
+
+  writeScript.on('close', () => {
+    // Add PostProcessing line to cups-pdf.conf (idempotent grep+append)
+    const patchConf = spawn('docker', [
+      'exec', 'ps-cups', 'sh', '-c',
+      'grep -q "^PostProcessing" /etc/cups/cups-pdf.conf 2>/dev/null' +
+      ' || echo "PostProcessing /usr/local/bin/cups-pdf-xps.sh" >> /etc/cups/cups-pdf.conf',
+    ]);
+    patchConf.on('close', () => setupPdfQueue(queueName, res));
+  });
+}
 
 function runTasks(tasks, res) {
   let idx = 0;
