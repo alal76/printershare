@@ -121,9 +121,9 @@
           rows="4"
           autocomplete="off"
           spellcheck="false"
-          placeholder='{"access_token":"...","token_type":"Bearer","refresh_token":"...","expiry":"..."}'
+          placeholder="{'access_token': '...', 'token_type': 'Bearer', 'refresh_token': '...', 'expiry': '...'}"
           class="w-full rounded-xl border-gray-200 text-xs font-mono resize-none"
-        />
+        ></textarea>
       </div>
 
       <div class="flex gap-2 pt-1">
@@ -157,7 +157,7 @@ import Button from '@/components/ui/Button.vue'
 
 /* ── inline micro-component so we don't add a file for a one-liner ─────── */
 const ResultBanner = defineComponent({
-  props: { ok: Boolean, message: String },
+  props: { ok: Boolean, message: { type: String, default: '' } },
   setup(props) {
     return () => h(
       'p',

@@ -15,7 +15,6 @@
 const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
-const os     = require('node:os');
 const { spawn, execSync } = require('node:child_process');
 const { sanitizePatch } = require('./settings');
 
@@ -171,9 +170,13 @@ router.get('/driver-check', (req, res) => {
 
 function checkPrintDriver(make) {
   try {
-    const lpinfo   = execSync('docker exec ps-cups lpinfo -m 2>&1', { timeout: 20000, encoding: 'utf8' });
-    const hasPpd   = lpinfo.toLowerCase().includes(make.toLowerCase());
-    const missing  = printPackages(make);
+    // Use lpinfo -m and grep for the make to avoid ENOBUFS on large PPD lists
+    const cmd  = make
+      ? `docker exec ps-cups lpinfo -m 2>&1 | grep -i ${JSON.stringify(make)} | head -5`
+      : 'docker exec ps-cups lpinfo -m 2>&1 | head -5';
+    const lpinfo  = execSync(cmd, { timeout: 20000, encoding: 'utf8', shell: true });
+    const hasPpd  = lpinfo.trim().length > 0;
+    const missing = printPackages(make);
     let detail;
     if (hasPpd) detail = `PPD found for ${make} in CUPS`;
     else if (missing.length) detail = `No PPD yet — will install: ${missing.join(', ')}`;
@@ -235,8 +238,6 @@ router.post('/driver-install', (req, res) => {
   const update = spawn('docker', ['exec', 'ps-cups', 'apt-get', 'update', '-qq'], {
     env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' },
   });
-  let updateErr = '';
-  update.stderr.on('data', d => { updateErr += d.toString(); });
   update.on('error', () => runTasks(tasks, res));  // non-fatal
   update.on('close', () => runTasks(tasks, res));
 
@@ -363,11 +364,15 @@ router.post('/build', (req, res) => {
 
   sendSse(res, 'log', '==> Writing configuration...');
 
-  sendSse(res, 'log', '==> Starting docker compose build...');
+  sendSse(res, 'log', '==> Applying settings (ensuring all services are up)...');
 
+  // Use --no-recreate so running containers (including nginx which proxies
+  // this SSE connection) are never stopped during the wizard run.
+  // Settings written to .env will take effect on next manual restart.
   const child = spawn('docker', [
-    'compose', '-f', composeFile, 'up', '--build', '-d',
-  ], { env: { ...process.env, DOCKER_BUILDKIT: '1' } });
+    'compose', '-f', composeFile, '--env-file', dotenvPath,
+    '-p', 'printershare', 'up', '-d', '--no-recreate',
+  ], { env: { ...process.env, DOCKER_PROGRESS: 'plain' } });
 
   child.stdout.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
   child.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
@@ -377,19 +382,20 @@ router.post('/build', (req, res) => {
     res.end();
   });
 
-  child.on('close', code => {
+  child.on('close', (code, signal) => {
     if (code === 0) {
       const state = loadState();
       state.completed = true;
       saveState(state);
-      sendSse(res, 'complete', 'Build successful');
+      sendSse(res, 'complete', 'Setup complete! Restart services from the Services page to apply all settings.');
     } else {
-      sendSse(res, 'error', `Build failed (exit ${code})`);
+      sendSse(res, 'error', `Build failed (exit ${code ?? signal})`);
     }
     res.end();
   });
 
-  req.on('close', () => child.kill());
+  // Do NOT kill child when client disconnects — docker compose must finish
+  // writing .env changes even if the browser tab is closed mid-flight.
 });
 
 // POST /api/v1/wizard/reset
