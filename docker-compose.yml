@@ -106,7 +106,9 @@ services:
   # IPP-over-USB proxy: makes USB printers/scanners speak IPP/eSCL
   # Enables AirPrint, Mopria, and AirScan/eSCL natively on clients
   ipp-usb:
-    image: openprinting/ipp-usb:latest
+    build:
+      context: ./ipp-usb
+    image: printershare-ipp-usb:latest
     container_name: ps-ipp-usb
     restart: unless-stopped
     network_mode: host
