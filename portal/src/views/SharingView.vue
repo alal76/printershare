@@ -211,7 +211,7 @@
                 Tailscale VPN
               </p>
               <StatusBadge
-                v-if="tailscaleService"
+                v-if="tailscaleEnabled"
                 class="ml-auto"
                 :status="tailscaleStatus"
                 :label="tailscaleLabel"
@@ -275,14 +275,20 @@ const sambaLabel = computed(() => sambaStatus.value === 'ok' ? 'Running' : 'Unkn
 
 // ── Tailscale status derived from health ─────────────────────────────────────
 const tailscaleService = computed(() => system.health?.services?.tailscale)
+const tailscaleEnabled  = computed(() => tailscaleService.value?.status !== 'disabled')
 const tailscaleStatus = computed(() => {
   const s = tailscaleService.value?.status
   if (s === 'ok')      return 'ok'      as const
   if (s === 'offline') return 'error'   as const
   return 'unknown' as const
 })
-const tailscaleLabel = computed(() => tailscaleStatus.value === 'ok' ? 'Connected' : 'Offline')
-const tailscaleIp    = computed(() => (tailscaleService.value as { ip?: string } | undefined)?.ip ?? null)
+const tailscaleLabel = computed(() => {
+  const s = tailscaleService.value?.status
+  if (s === 'ok')      return 'Connected'
+  if (s === 'offline') return 'Offline'
+  return 'Disabled'
+})
+const tailscaleIp    = computed(() => tailscaleService.value?.ip ?? null)
 
 // ── Hostname (falls back to window.location.hostname) ────────────────────────
 const host = computed(() => globalThis.location?.hostname ?? 'printershare.local')

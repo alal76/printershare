@@ -1,7 +1,7 @@
 'use strict';
 
 const router = require('express').Router();
-const { execSync } = require('node:child_process');
+const { execSync, execFile } = require('node:child_process');
 
 const CUPS_HOST           = process.env.CUPS_HOST           || 'host.docker.internal';
 const CUPS_PORT           = Number.parseInt(process.env.CUPS_PORT  || '631', 10);
@@ -50,24 +50,38 @@ function containerRunning(name) {
 }
 
 /**
- * Check whether the Tailscale daemon inside ps-tailscale is connected to the
- * tailnet (BackendState === "Running") and return its Tailscale IP if so.
- * Returns { connected: boolean, ip: string|null }.
+ * Module-level Tailscale status cache.  Refreshed every 60 s via an
+ * unref'd setInterval so it never blocks the event loop during a request.
+ * @type {{ connected: boolean, ip: string|null }}
+ */
+let _tailscaleCache = { connected: false, ip: null };
+
+function _refreshTailscaleCache() {
+  execFile('docker', ['exec', 'ps-tailscale', 'tailscale', 'status', '--json'], { timeout: 5000, encoding: 'utf8' }, (err, stdout) => {
+    if (err || !stdout) { _tailscaleCache = { connected: false, ip: null }; return; }
+    try {
+      const data      = JSON.parse(stdout.trim());
+      const connected = data.BackendState === 'Running';
+      const ip        = connected && data.Self?.TailscaleIPs?.length ? data.Self.TailscaleIPs[0] : null;
+      _tailscaleCache = { connected, ip };
+    } catch {
+      _tailscaleCache = { connected: false, ip: null };
+    }
+  });
+}
+
+// Kick off immediately then refresh every 60 s; .unref() keeps it from
+// blocking a clean process exit.
+_refreshTailscaleCache();
+setInterval(_refreshTailscaleCache, 60_000).unref();
+
+/**
+ * Check whether the Tailscale daemon inside ps-tailscale is connected.
+ * Returns the most recently cached result (never blocks the event loop).
+ * @returns {{ connected: boolean, ip: string|null }}
  */
 function tailscaleStatus() {
-  try {
-    const out = execSync(
-      `docker exec ps-tailscale tailscale status --json 2>/dev/null`,
-      { timeout: 5000 },
-    ).toString().trim();
-    const data = JSON.parse(out);
-    const connected = data.BackendState === 'Running';
-    const self      = data.Self;
-    const ip        = connected && self?.TailscaleIPs?.length ? self.TailscaleIPs[0] : null;
-    return { connected, ip };
-  } catch {
-    return { connected: false, ip: null };
-  }
+  return _tailscaleCache;
 }
 
 /**

@@ -2,8 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 interface ServiceHealth {
-  status: 'ok' | 'error' | 'offline' | 'unknown'
+  status: 'ok' | 'error' | 'offline' | 'unknown' | 'disabled'
   message?: string
+  ip?: string
 }
 
 interface HealthData {

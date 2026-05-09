@@ -13,7 +13,7 @@
  */
 
 const router = require('express').Router();
-const { execSync }   = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const { parseUsbDevices } = require('../services/usb-detect');
 
 /** Allowed characters in a CUPS printer name. */
@@ -23,17 +23,21 @@ const SAFE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 const SAFE_URI = /^ipps?:\/\/[A-Za-z0-9._\-:/]+$/;
 
 /**
- * Run a command with execSync, capturing stdout as a string.
- * @param {string} cmd
- * @param {number} [timeout=10000]
+ * Run a command with an explicit arg array (no shell), capturing stdout.
+ * @param {string[]} args  First element is the executable; the rest are arguments.
+ * @param {number}   [timeout=10000]
  * @returns {string}
  */
-function run(cmd, timeout = 10_000) {
-  return execSync(cmd, {
+function run(args, timeout = 10_000) {
+  const result = spawnSync(args[0], args.slice(1), {
     encoding: 'utf8',
     timeout,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error((result.stderr || `Command failed with exit ${result.status}`).slice(0, 400));
+  }
+  return (result.stdout || '').trim();
 }
 
 /**
@@ -55,7 +59,7 @@ function parsePrinterState(detail) {
  */
 function getPrinterUri(name) {
   try {
-    const uriOut = run(`lpstat -v ${name}`, 3_000);
+    const uriOut = run(['lpstat', '-v', name], 3_000);
     const uriRe  = /device for \S+:\s*(\S+)/;
     const m      = uriRe.exec(uriOut);
     return m ? m[1] : '';
@@ -71,13 +75,13 @@ function getPrinterUri(name) {
 router.get('/', (_req, res) => {
   // --- USB devices ---
   let usbRaw = '';
-  try { usbRaw = run('lsusb', 5_000); } catch { /* lsusb not available */ }
+  try { usbRaw = run(['lsusb'], 5_000); } catch { /* lsusb not available */ }
   const usb = parseUsbDevices(usbRaw);
 
   // --- CUPS printers via lpstat -p ---
   const printers = [];
   try {
-    const lpOut    = run('lpstat -p', 5_000);
+    const lpOut    = run(['lpstat', '-p'], 5_000);
     const printerRe = /^printer (\S+)\s+(.+)$/gm;
     let m;
     while ((m = printerRe.exec(lpOut)) !== null) {
@@ -109,8 +113,8 @@ router.post('/printer', (req, res) => {
   }
 
   try {
-    run(`lpadmin -p ${name} -E -v ${uri} -m everywhere`, 20_000);
-    run(`lpadmin -d ${name}`, 5_000); // set as default
+    run(['lpadmin', '-p', name, '-E', '-v', uri, '-m', 'everywhere'], 20_000);
+    run(['lpadmin', '-d', name], 5_000); // set as default
     res.json({ ok: true, name, uri });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });
@@ -127,7 +131,7 @@ router.delete('/printer/:name', (req, res) => {
     return res.status(400).json({ error: 'Invalid printer name' });
   }
   try {
-    run(`lpadmin -x ${name}`, 10_000);
+    run(['lpadmin', '-x', name], 10_000);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });
@@ -144,7 +148,7 @@ router.post('/printer/:name/test', (req, res) => {
     return res.status(400).json({ error: 'Invalid printer name' });
   }
   try {
-    const out = run(`lp -d ${name} /usr/share/cups/data/testprint`, 15_000);
+    const out = run(['lp', '-d', name, '/usr/share/cups/data/testprint'], 15_000);
     res.json({ ok: true, message: out || 'Test page sent' });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });

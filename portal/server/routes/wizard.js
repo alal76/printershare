@@ -15,8 +15,11 @@
 const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
-const { spawn, execSync } = require('node:child_process');
+const { spawn, execSync, spawnSync } = require('node:child_process');
 const { sanitizePatch } = require('./settings');
+
+/** Allowed characters in a printer/scanner make field. */
+const SAFE_MAKE = /^[A-Za-z0-9 _-]{1,64}$/;
 
 const DATA_DIR   = process.env.PORTAL_DATA_DIR || '/app/data';
 const STATE_FILE = path.join(DATA_DIR, 'wizard-state.json');
@@ -169,13 +172,16 @@ router.get('/driver-check', (req, res) => {
 });
 
 function checkPrintDriver(make) {
+  if (make && !SAFE_MAKE.test(make)) {
+    return { ok: false, packages: [], detail: 'Invalid make value' };
+  }
   try {
-    // Use lpinfo -m and grep for the make to avoid ENOBUFS on large PPD lists
-    const cmd  = make
-      ? `docker exec ps-cups lpinfo -m 2>&1 | grep -i ${JSON.stringify(make)} | head -5`
-      : 'docker exec ps-cups lpinfo -m 2>&1 | head -5';
-    const lpinfo  = execSync(cmd, { timeout: 20000, encoding: 'utf8', shell: true });
-    const hasPpd  = lpinfo.trim().length > 0;
+    const result  = spawnSync('docker', ['exec', 'ps-cups', 'lpinfo', '-m'], { timeout: 20000, encoding: 'utf8' });
+    const output  = ((result.stdout || '') + (result.stderr || '')).split('\n');
+    const lines   = make
+      ? output.filter(l => l.toLowerCase().includes(make.toLowerCase())).slice(0, 5)
+      : output.slice(0, 5);
+    const hasPpd  = lines.some(l => l.trim().length > 0);
     const missing = printPackages(make);
     let detail;
     if (hasPpd) detail = `PPD found for ${make} in CUPS`;
