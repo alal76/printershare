@@ -50,6 +50,27 @@ function containerRunning(name) {
 }
 
 /**
+ * Check whether the Tailscale daemon inside ps-tailscale is connected to the
+ * tailnet (BackendState === "Running") and return its Tailscale IP if so.
+ * Returns { connected: boolean, ip: string|null }.
+ */
+function tailscaleStatus() {
+  try {
+    const out = execSync(
+      `docker exec ps-tailscale tailscale status --json 2>/dev/null`,
+      { timeout: 5000 },
+    ).toString().trim();
+    const data = JSON.parse(out);
+    const connected = data.BackendState === 'Running';
+    const self      = data.Self;
+    const ip        = connected && self?.TailscaleIPs?.length ? self.TailscaleIPs[0] : null;
+    return { connected, ip };
+  } catch {
+    return { connected: false, ip: null };
+  }
+}
+
+/**
  * Build a service status entry, returning `disabled` when the owning profile
  * is not active.
  */
@@ -77,7 +98,11 @@ router.get('/', async (_req, res) => {
     paperless:  serviceStatus(docsEnabled,   paperless.ok, paperless.latency_ms),
     samba:      serviceStatus(true,          containerRunning('ps-samba')),
     nfs:        serviceStatus(true,          containerRunning('ps-nfs')),
-    tailscale:  serviceStatus(remoteEnabled, containerRunning('ps-tailscale')),
+    tailscale:  (() => {
+      if (!remoteEnabled) return { status: 'disabled', latency_ms: 0 };
+      const ts = tailscaleStatus();
+      return { status: ts.connected ? 'ok' : 'offline', latency_ms: 0, ip: ts.ip };
+    })(),
     cloudflare: serviceStatus(remoteEnabled, containerRunning('ps-cloudflared')),
   };
 
