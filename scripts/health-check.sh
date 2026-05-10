@@ -53,7 +53,7 @@ check() {
 echo "==> Health checks against ${BASE_URL}"
 check "Portal API"       "${BASE_URL}/api/v1/health"
 check "Static assets"   "${BASE_URL}/"
-check "CUPS (nginx)"    "${BASE_URL}/cups/"             302
+check "CUPS (nginx)"    "${BASE_URL}/cups/"
 
 echo ""
 if [[ "${FAILURES}" -gt 0 ]]; then
