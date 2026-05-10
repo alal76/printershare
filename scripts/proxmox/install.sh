@@ -146,38 +146,26 @@ grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
     echo '0.0.0.0/0' >>/etc/sane.d/saned.conf
 
 # ── Scanservjs ──────────────────────────────────────────────────────────────
-info "Installing scanservjs"
-if [[ ! -d "$SCANSERVJS_DIR/.git" ]]; then
-    git clone --depth 1 https://github.com/sbs20/scanservjs.git "$SCANSERVJS_DIR"
-else
-    git -C "$SCANSERVJS_DIR" pull --ff-only || true
+# Upstream restructured the repo (app-server/ + app-ui/ instead of server/)
+# and the official install path is now the bootstrap script, which builds
+# a deb, installs it with all dependencies, and registers its own systemd
+# unit `scanservjs.service` listening on :8080.
+info "Installing scanservjs (official bootstrap → deb)"
+if ! dpkg -s scanservjs &>/dev/null; then
+    curl -fsSL https://raw.githubusercontent.com/sbs20/scanservjs/master/bootstrap.sh \
+        | bash -s -- -v latest
 fi
-( cd "$SCANSERVJS_DIR" && npm install --omit=dev --silent )
-mkdir -p "$SCANSERVJS_DIR/config"
-cp -f "$REPO_DIR/scanservjs/config.js" "$SCANSERVJS_DIR/config/config.js"
+# Drop our config + post-scan hook into the package install dir.
+SCANSERVJS_ETC=/etc/scanservjs
+mkdir -p "$SCANSERVJS_ETC"
+cp -f "$REPO_DIR/scanservjs/config.js" "$SCANSERVJS_ETC/config.local.js"
 install -m 755 "$REPO_DIR/scanservjs/scripts/scan-save-upload.sh" /usr/local/bin/scan-save-upload.sh
-
-cat >/etc/systemd/system/scanservjs.service <<UNIT
-[Unit]
-Description=Scanservjs Web Scanner UI
-After=network.target avahi-daemon.service
-Wants=avahi-daemon.service
-
-[Service]
-Type=simple
-WorkingDirectory=$SCANSERVJS_DIR
-ExecStart=$(command -v node) server/server.js
-Restart=on-failure
-RestartSec=3
-Environment=NODE_ENV=production
-Environment=PORT=$SCANSERVJS_PORT
-# scanservjs writes scans here (see scanservjs/config.js)
-Environment=OUTPUT_DIR=$SCANS_DIR
-User=root
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+# Remove any stale unit from a previous (broken) git-build install.
+if [[ -f /etc/systemd/system/scanservjs.service ]] && \
+   grep -q '/opt/scanservjs' /etc/systemd/system/scanservjs.service 2>/dev/null; then
+    rm -f /etc/systemd/system/scanservjs.service
+    systemctl daemon-reload
+fi
 
 # ── AirSane (eSCL / AirScan bridge for SANE scanners) ───────────────────────
 # Exposes /etc/sane.d backends as Apple AirScan / Mopria eSCL endpoints with
