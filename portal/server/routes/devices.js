@@ -95,12 +95,18 @@ function getPrinterUri(name) {
  * Returns USB devices (from lsusb) and CUPS printers (from lpstat).
  */
 router.get('/', (_req, res) => {
+  // Run `scanimage -L` exactly once and reuse the output for both the
+  // /scanners list and the lsusb capability annotation. Probing SANE on
+  // the SCX-3400 takes ~6-8s per call; calling it twice doubled the
+  // /api/v1/devices latency for no reason.
+  const saneRaw = collectSaneRaw();
+
   // --- USB devices ---
   let usbRaw = '';
   try { usbRaw = run(['lsusb'], 5_000); } catch { /* lsusb not available */ }
   const usb = parseUsbDevices(usbRaw, {
     cupsPrinterMakes: collectCupsPrinterMakes(),
-    saneUsbDevices:   collectSaneUsbDevices(),
+    saneUsbDevices:   parseSaneUsbDevices(saneRaw),
   });
 
   // --- CUPS printers via lpstat -p ---
@@ -118,8 +124,8 @@ router.get('/', (_req, res) => {
     }
   } catch { /* CUPS not available */ }
 
-  // --- SANE scanners via scanimage -L ---
-  const scanners = collectSaneScanners();
+  // --- SANE scanners via cached scanimage -L output ---
+  const scanners = parseSaneScanners(saneRaw);
 
   res.json({ usb, printers, scanners });
 });
@@ -130,15 +136,24 @@ router.get('/', (_req, res) => {
  *   device `xerox_mfp:libusb:001:002' is a Samsung SCX-3400 Series ...
  * @returns {Array<{device:string, vendor:string, model:string, type:string}>}
  */
-function collectSaneScanners() {
-  let raw = '';
+/**
+ * Run `scanimage -L` once and return its combined stdout+stderr. Helpers
+ * that need different views of the data (scanner descriptors / USB
+ * bus:device pairs) parse this raw output instead of re-invoking the CLI.
+ * @returns {string}
+ */
+function collectSaneRaw() {
   try {
     const { cmd, args } = scanCmd(['scanimage', '-L']);
     const r = spawnSync(cmd, args, { timeout: 10_000, encoding: 'utf8' });
-    raw = (r.stdout || '') + (r.stderr || '');
+    return (r.stdout || '') + (r.stderr || '');
   } catch {
-    return [];
+    return '';
   }
+}
+
+/** @param {string} raw */
+function parseSaneScanners(raw) {
   const out = [];
   const re = /^device `([^']+)'\s+is\s+a\s+(\S+)\s+(.+?)\s+(\S+)\s*$/gm;
   let m;
@@ -171,21 +186,15 @@ function collectCupsPrinterMakes() {
  * Collect bus/device pairs of USB scanners detected by SANE.
  * @returns {Array<{bus:string, device:string}>}
  */
-function collectSaneUsbDevices() {
-  try {
-    const { cmd, args } = scanCmd(['scanimage', '-L']);
-    const r = spawnSync(cmd, args, { timeout: 8000, encoding: 'utf8' });
-    const out = (r.stdout || '') + (r.stderr || '');
-    const result = [];
-    const re = /libusb:(\d{3}):(\d{3})/g;
-    let m;
-    while ((m = re.exec(out)) !== null) {
-      result.push({ bus: m[1], device: m[2] });
-    }
-    return result;
-  } catch {
-    return [];
+/** @param {string} raw */
+function parseSaneUsbDevices(raw) {
+  const result = [];
+  const re = /libusb:(\d{3}):(\d{3})/g;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    result.push({ bus: m[1], device: m[2] });
   }
+  return result;
 }
 
 /**
