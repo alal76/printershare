@@ -4,6 +4,7 @@ const router   = require('express').Router();
 const { execSync, spawnSync } = require('node:child_process');
 const os       = require('node:os');
 const { version: packageVersion } = require('../../package.json');
+const { cupsCmd, scanCmd } = require('../lib/deployment');
 
 // GET /api/v1/system/info
 router.get('/info', (_req, res) => {
@@ -55,9 +56,8 @@ router.get('/usb', (_req, res) => {
  */
 function collectCupsPrinterMakes() {
   try {
-    const r = spawnSync('docker', ['exec', 'ps-cups', 'lpinfo', '-v'], {
-      timeout: 8000, encoding: 'utf8',
-    });
+    const { cmd, args } = cupsCmd(['lpinfo', '-v']);
+    const r = spawnSync(cmd, args, { timeout: 8000, encoding: 'utf8' });
     const out = (r.stdout || '') + (r.stderr || '');
     const makes = new Set();
     const re = /usb:\/\/([^/?\s]+)\//g;
@@ -78,9 +78,8 @@ function collectCupsPrinterMakes() {
  */
 function collectSaneUsbDevices() {
   try {
-    const r = spawnSync('docker', ['exec', 'ps-scanservjs', 'scanimage', '-L'], {
-      timeout: 8000, encoding: 'utf8',
-    });
+    const { cmd, args } = scanCmd(['scanimage', '-L']);
+    const r = spawnSync(cmd, args, { timeout: 8000, encoding: 'utf8' });
     const out = (r.stdout || '') + (r.stderr || '');
     const result = [];
     const re = /libusb:(\d{3}):(\d{3})/g;

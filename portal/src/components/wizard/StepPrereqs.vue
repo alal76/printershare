@@ -44,7 +44,7 @@
       v-if="hasError"
       class="text-xs text-red-600"
     >
-      Fix the errors above before continuing. Some issues can be resolved by re-running after fixing Docker permissions.
+      Fix the errors above before continuing.
     </p>
   </div>
 </template>
@@ -66,8 +66,7 @@ const emit = defineEmits<{ (e: 'valid', v: boolean): void }>()
 
 const checks = ref<Check[]>([
   { id: 'health',  label: 'Portal server reachable',   detail: '', state: 'pending' },
-  { id: 'docker',  label: 'Docker socket available',   detail: '', state: 'pending' },
-  { id: 'compose', label: 'Docker Compose plugin',     detail: '', state: 'pending' },
+  { id: 'platform', label: 'Platform runtime available',     detail: '', state: 'pending' },
   { id: 'cups',    label: 'CUPS service reachable',    detail: '', state: 'pending' },
   { id: 'scanner', label: 'ScanServJS reachable',      detail: '', state: 'pending' },
   { id: 'rclone',  label: 'rclone installed',          detail: '(needed for cloud backup)', state: 'pending' },
@@ -85,7 +84,6 @@ onMounted(async () => {
     const r = await fetch('/api/v1/health')
     const data = await r.json()
     updateCheck('health', 'ok', 'Connected')
-    updateCheck('docker', 'ok', 'Portal running')
     const svcs = data.services ?? {}
     updateCheck('cups',    svcs.cups?.status      === 'ok' ? 'ok' : 'error', svcs.cups?.message     ?? '')
     updateCheck('scanner', svcs.scanservjs?.status === 'ok' ? 'ok' : 'error', svcs.scanservjs?.message ?? '')
@@ -95,24 +93,24 @@ onMounted(async () => {
     return
   }
 
-  // Tool availability checks (docker compose + rclone)
+  // Tool availability checks (platform runtime + rclone)
   try {
     const r2 = await fetch('/api/v1/wizard/prereqs')
     const tools = await r2.json() as Record<string, { ok: boolean; detail?: string }>
-    updateCheck('compose', tools.dockerCompose?.ok ? 'ok' : 'error', tools.dockerCompose?.detail ?? '')
+    updateCheck('platform', tools.dockerCompose?.ok ? 'ok' : 'error', tools.dockerCompose?.detail ?? '')
     // rclone is optional (warn only, don't block)
     if (tools.rclone?.ok) {
       updateCheck('rclone', 'ok', tools.rclone.detail ?? 'installed')
     } else {
       const c = checks.value.find(x => x.id === 'rclone')
-      if (c) { c.state = 'error'; c.detail = 'Not found — will be missing from the portal container (rebuild required)' }
+      if (c) { c.state = 'error'; c.detail = 'Not found — install rclone on the host (or rebuild portal container)' }
     }
   } catch {
-    updateCheck('compose', 'error', 'Could not reach prereqs API')
+    updateCheck('platform', 'error', 'Could not reach prereqs API')
     updateCheck('rclone',  'error', 'Could not reach prereqs API')
   }
 
-  // rclone missing blocks wizard only if the compose check also fails; otherwise warn
+  // rclone missing blocks wizard only if the platform check also fails; otherwise warn
   const blockingError = checks.value.some(c => c.state === 'error' && c.id !== 'rclone')
   emit('valid', !blockingError)
 })

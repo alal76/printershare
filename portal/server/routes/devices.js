@@ -19,6 +19,7 @@ const fs     = require('node:fs');
 const path   = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { parseUsbDevices } = require('../services/usb-detect');
+const { cupsCmd, scanCmd } = require('../lib/deployment');
 
 /** Allowed characters in a CUPS printer name. */
 const SAFE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -51,12 +52,14 @@ function run(args, timeout = 10_000) {
 }
 
 /**
- * Run a CUPS CLI command inside the ps-cups container.
- * @param {string[]} cupsArgs  Args after the container name (e.g. ['lpstat', '-p']).
+ * Run a CUPS CLI command (`docker exec ps-cups ...` in Docker mode, or
+ * the bare command in native mode — see `lib/deployment`).
+ * @param {string[]} cupsArgs  e.g. ['lpstat', '-p']
  * @param {number}   [timeout]
  */
 function runCups(cupsArgs, timeout = 10_000) {
-  return run(['docker', 'exec', 'ps-cups', ...cupsArgs], timeout);
+  const { cmd, args } = cupsCmd(cupsArgs);
+  return run([cmd, ...args], timeout);
 }
 
 /**
@@ -130,9 +133,8 @@ router.get('/', (_req, res) => {
 function collectSaneScanners() {
   let raw = '';
   try {
-    const r = spawnSync('docker', ['exec', 'ps-scanservjs', 'scanimage', '-L'], {
-      timeout: 10_000, encoding: 'utf8',
-    });
+    const { cmd, args } = scanCmd(['scanimage', '-L']);
+    const r = spawnSync(cmd, args, { timeout: 10_000, encoding: 'utf8' });
     raw = (r.stdout || '') + (r.stderr || '');
   } catch {
     return [];
@@ -171,9 +173,8 @@ function collectCupsPrinterMakes() {
  */
 function collectSaneUsbDevices() {
   try {
-    const r = spawnSync('docker', ['exec', 'ps-scanservjs', 'scanimage', '-L'], {
-      timeout: 8000, encoding: 'utf8',
-    });
+    const { cmd, args } = scanCmd(['scanimage', '-L']);
+    const r = spawnSync(cmd, args, { timeout: 8000, encoding: 'utf8' });
     const out = (r.stdout || '') + (r.stderr || '');
     const result = [];
     const re = /libusb:(\d{3}):(\d{3})/g;
@@ -424,10 +425,12 @@ router.post('/reset', (_req, res) => {
 });
 
 /**
- * Run a docker exec on the scanservjs container.
+ * Run a SANE / scanimage CLI command. In Docker mode this shells into the
+ * ps-scanservjs container; in native mode it runs `scanimage` directly.
  */
 function runScan(args, timeout = 10_000) {
-  return run(['docker', 'exec', 'ps-scanservjs', ...args], timeout);
+  const { cmd, args: cmdArgs } = scanCmd(args);
+  return run([cmd, ...cmdArgs], timeout);
 }
 
 /**

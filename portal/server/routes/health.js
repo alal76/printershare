@@ -1,14 +1,14 @@
 'use strict';
 
 const router = require('express').Router();
-const { execSync, execFile } = require('node:child_process');
+const { execFile } = require('node:child_process');
+const { isNative, serviceRunning } = require('../lib/deployment');
 
-const CUPS_HOST           = process.env.CUPS_HOST           || 'host.docker.internal';
+// In native mode, CUPS and scanservjs run on localhost; in Docker we
+// reach them via the compose network DNS / host.docker.internal.
+const CUPS_HOST           = process.env.CUPS_HOST           || (isNative() ? '127.0.0.1' : 'host.docker.internal');
 const CUPS_PORT           = Number.parseInt(process.env.CUPS_PORT  || '631', 10);
-// SCANSERVJS_INTERNAL is the Docker-compose-friendly default; SCANSERVJS_URL
-// is the unified env name (also read by scans.js) used by the native LXC
-// installer. Check both so health works in both deployments.
-const SCANSERVJS_INTERNAL = process.env.SCANSERVJS_INTERNAL || process.env.SCANSERVJS_URL || 'http://ps-scanservjs:8080';
+const SCANSERVJS_INTERNAL = process.env.SCANSERVJS_INTERNAL || process.env.SCANSERVJS_URL || (isNative() ? 'http://127.0.0.1:8080' : 'http://ps-scanservjs:8080');
 const PAPERLESS_INTERNAL  = process.env.PAPERLESS_INTERNAL  || 'http://ps-paperless:8000';
 
 /**
@@ -40,16 +40,12 @@ function fetchWithTimeout(url, ms) {
 }
 
 /**
- * Check a Docker container is running.
+ * Check whether a logical service is currently running. Delegates to the
+ * deployment helper, which uses `docker inspect` in Docker mode and
+ * `systemctl is-active` in native mode.
  */
 function containerRunning(name) {
-  try {
-    const out = execSync(`docker inspect --format='{{.State.Running}}' ${name} 2>/dev/null`, { timeout: 3000 })
-      .toString().trim();
-    return out === 'true';
-  } catch {
-    return false;
-  }
+  return serviceRunning(name);
 }
 
 /**
@@ -60,7 +56,7 @@ function containerRunning(name) {
 let _tailscaleCache = { connected: false, ip: null };
 
 function _refreshTailscaleCache() {
-  execFile('docker', ['exec', 'ps-tailscale', 'tailscale', 'status', '--json'], { timeout: 5000, encoding: 'utf8' }, (err, stdout) => {
+  const handle = (err, stdout) => {
     if (err || !stdout) { _tailscaleCache = { connected: false, ip: null }; return; }
     try {
       const data      = JSON.parse(stdout.trim());
@@ -70,7 +66,12 @@ function _refreshTailscaleCache() {
     } catch {
       _tailscaleCache = { connected: false, ip: null };
     }
-  });
+  };
+  if (isNative()) {
+    execFile('tailscale', ['status', '--json'], { timeout: 5000, encoding: 'utf8' }, handle);
+  } else {
+    execFile('docker', ['exec', 'ps-tailscale', 'tailscale', 'status', '--json'], { timeout: 5000, encoding: 'utf8' }, handle);
+  }
 }
 
 // Kick off immediately then refresh every 60 s; .unref() keeps it from
@@ -111,17 +112,17 @@ router.get('/', async (_req, res) => {
 
   const services = {
     cups:       { status: cups.ok       ? 'ok' : 'error', latency_ms: cups.latency_ms,      message: cups.message },
-    'ipp-usb':  serviceStatus(true,          containerRunning('ps-ipp-usb')),
+    'ipp-usb':  serviceStatus(true,          containerRunning('ipp-usb')),
     scanservjs: { status: scanservjs.ok ? 'ok' : 'error', latency_ms: scanservjs.latency_ms, message: scanservjs.message },
     paperless:  serviceStatus(docsEnabled,   paperless.ok, paperless.latency_ms),
-    samba:      serviceStatus(true,          containerRunning('ps-samba')),
-    nfs:        serviceStatus(nfsEnabled,    containerRunning('ps-nfs')),
+    samba:      serviceStatus(true,          containerRunning('samba')),
+    nfs:        serviceStatus(nfsEnabled,    containerRunning('nfs')),
     tailscale:  (() => {
       if (!remoteEnabled) return { status: 'disabled', latency_ms: 0 };
       const ts = tailscaleStatus();
       return { status: ts.connected ? 'ok' : 'offline', latency_ms: 0, ip: ts.ip };
     })(),
-    cloudflare: serviceStatus(remoteEnabled, containerRunning('ps-cloudflared')),
+    cloudflare: serviceStatus(remoteEnabled, containerRunning('cloudflared')),
   };
 
   const hasError = Object.values(services).some(s => s.status === 'error');

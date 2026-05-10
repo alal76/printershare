@@ -6,9 +6,9 @@
  *
  * GET  /api/v1/wizard/state       – Returns the persisted wizard state
  * POST /api/v1/wizard/state       – Advances the wizard step and merges config
- * GET  /api/v1/wizard/prereqs     – Checks docker compose + rclone availability
+ * GET  /api/v1/wizard/prereqs     – Checks platform prerequisites (docker compose / systemd) + rclone
  * POST /api/v1/wizard/rclone-auth – Creates an rclone remote from a pasted token or S3 keys
- * POST /api/v1/wizard/build       – Writes .env and streams docker compose up via SSE
+ * POST /api/v1/wizard/build       – Persists .env and (Docker mode) brings the stack up via SSE
  * POST /api/v1/wizard/reset       – Clears persisted state
  */
 
@@ -17,6 +17,7 @@ const fs     = require('node:fs');
 const path   = require('node:path');
 const { spawn, execSync, spawnSync } = require('node:child_process');
 const { sanitizePatch } = require('./settings');
+const { isNative, cupsCmd, scanCmd } = require('../lib/deployment');
 
 /** Allowed characters in a printer/scanner make field. */
 const SAFE_MAKE = /^[A-Za-z0-9 _-]{1,64}$/;
@@ -86,15 +87,44 @@ function sendSse(res, type, data) {
   res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
 }
 
-// GET /api/v1/wizard/prereqs — check required tools are available in the container
+/**
+ * Build a spawn-friendly argv pair for running a shell command "inside" a
+ * service. In Docker mode this uses `docker exec <container>`; in native
+ * mode the argv is run directly on the host.
+ * @param {string}   container  e.g. 'ps-cups'
+ * @param {string[]} args       e.g. ['apt-get', 'update', '-qq']
+ * @returns {{ cmd: string, args: string[] }}
+ */
+function execIn(container, args) {
+  if (isNative()) return { cmd: args[0], args: args.slice(1) };
+  return { cmd: 'docker', args: ['exec', container, ...args] };
+}
+
+// GET /api/v1/wizard/prereqs — check required tools are available
 router.get('/prereqs', (_req, res) => {
   const result = {};
 
-  try {
-    const ver = execSync('docker compose version 2>&1', { timeout: 5000, encoding: 'utf8' }).trim();
-    result.dockerCompose = { ok: true, detail: ver.split('\n')[0] };
-  } catch {
-    result.dockerCompose = { ok: false, detail: 'docker compose plugin not found' };
+  if (isNative()) {
+    // Native LXC / bare-metal: check systemd + cups unit instead of docker.
+    try {
+      const ver = execSync('systemctl --version 2>&1', { timeout: 3000, encoding: 'utf8' })
+        .trim().split('\n')[0];
+      const cupsActive = execSync('systemctl is-active cups 2>&1', { timeout: 3000, encoding: 'utf8' }).trim();
+      const ok = cupsActive === 'active';
+      result.dockerCompose = {
+        ok,
+        detail: ok ? `${ver} (native, cups active)` : `${ver} (cups: ${cupsActive})`,
+      };
+    } catch (e) {
+      result.dockerCompose = { ok: false, detail: `systemd unavailable: ${String(e.message).slice(0, 200)}` };
+    }
+  } else {
+    try {
+      const ver = execSync('docker compose version 2>&1', { timeout: 5000, encoding: 'utf8' }).trim();
+      result.dockerCompose = { ok: true, detail: ver.split('\n')[0] };
+    } catch {
+      result.dockerCompose = { ok: false, detail: 'docker compose plugin not found' };
+    }
   }
 
   try {
@@ -139,16 +169,16 @@ function scanPackages(make) {
 // GET /api/v1/wizard/scan-devices — list SANE-visible scanners via scanimage -L
 router.get('/scan-devices', (_req, res) => {
   try {
-    const raw = execSync('docker exec ps-scanservjs scanimage -L 2>&1', {
-      timeout: 20000, encoding: 'utf8',
-    });
+    const { cmd, args } = scanCmd(['scanimage', '-L']);
+    const r = spawnSync(cmd, args, { timeout: 20000, encoding: 'utf8' });
+    const raw = ((r.stdout || '') + (r.stderr || '')).trim();
     // Each line: device `backend:path' is a <description>
     const scanners = [];
     for (const line of raw.split('\n')) {
       const m = line.match(/^device [`']([^`']+)[`'] is a (.+)$/);
       if (m) scanners.push({ device: m[1], description: m[2].trim() });
     }
-    res.json({ scanners, raw: raw.trim() });
+    res.json({ scanners, raw });
   } catch (err) {
     res.json({ scanners: [], raw: String(err.message) });
   }
@@ -176,7 +206,8 @@ function checkPrintDriver(make) {
     return { ok: false, packages: [], detail: 'Invalid make value' };
   }
   try {
-    const result  = spawnSync('docker', ['exec', 'ps-cups', 'lpinfo', '-m'], { timeout: 20000, encoding: 'utf8' });
+    const { cmd, args } = cupsCmd(['lpinfo', '-m']);
+    const result  = spawnSync(cmd, args, { timeout: 20000, encoding: 'utf8' });
     const output  = ((result.stdout || '') + (result.stderr || '')).split('\n');
     const lines   = make
       ? output.filter(l => l.toLowerCase().includes(make.toLowerCase())).slice(0, 5)
@@ -195,7 +226,9 @@ function checkPrintDriver(make) {
 
 function checkScanDriver(make, vidpid) {
   try {
-    const saneList = execSync('docker exec ps-scanservjs scanimage -L 2>&1', { timeout: 15000, encoding: 'utf8' });
+    const { cmd, args } = scanCmd(['scanimage', '-L']);
+    const r = spawnSync(cmd, args, { timeout: 15000, encoding: 'utf8' });
+    const saneList = (r.stdout || '') + (r.stderr || '');
     const found    = saneList.toLowerCase().includes(make.toLowerCase()) ||
                      (vidpid && saneList.includes(vidpid.split(':')[0]));
     const missing  = scanPackages(make);
@@ -245,8 +278,10 @@ router.post('/driver-install', (req, res) => {
   persistExtraPackages(printPkgs);
 
   // Run apt-get update once, then install each task in sequence
-  sendSse(res, 'log', '==> Updating package lists in ps-cups...');
-  const update = spawn('docker', ['exec', 'ps-cups', 'apt-get', 'update', '-qq'], {
+  const updateLabel = isNative() ? 'host' : 'ps-cups';
+  sendSse(res, 'log', `==> Updating package lists (${updateLabel})...`);
+  const upd = execIn('ps-cups', ['apt-get', 'update', '-qq']);
+  const update = spawn(upd.cmd, upd.args, {
     env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' },
   });
   update.on('error', () => runTasks(tasks, res));  // non-fatal
@@ -268,9 +303,11 @@ function installVirtualPrinter(make, res) {
   const packages  = isPdf ? ['printer-driver-cups-pdf'] : ['printer-driver-cups-pdf', 'ghostscript'];
   const label     = isPdf ? 'PDF' : 'XPS';
 
-  sendSse(res, 'log', `==> Installing ${label} virtual printer packages (${packages.join(', ')}) in ps-cups...`);
+  const target = isNative() ? 'host' : 'ps-cups';
+  sendSse(res, 'log', `==> Installing ${label} virtual printer packages (${packages.join(', ')}) on ${target}...`);
 
-  const update = spawn('docker', ['exec', 'ps-cups', 'apt-get', 'update', '-qq'], {
+  const upd = execIn('ps-cups', ['apt-get', 'update', '-qq']);
+  const update = spawn(upd.cmd, upd.args, {
     env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' },
   });
   update.on('error', () => doInstallVirtual(packages, queueName, isPdf, res));
@@ -278,9 +315,11 @@ function installVirtualPrinter(make, res) {
 }
 
 function doInstallVirtual(packages, queueName, isPdf, res) {
-  const install = spawn('docker', [
-    'exec', 'ps-cups', 'apt-get', 'install', '-y', '--no-install-recommends', ...packages,
-  ], { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+  const inst = execIn('ps-cups', [
+    'apt-get', 'install', '-y', '--no-install-recommends', ...packages,
+  ]);
+  const install = spawn(inst.cmd, inst.args,
+    { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
 
   install.stdout.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
   install.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
@@ -302,11 +341,11 @@ function doInstallVirtual(packages, queueName, isPdf, res) {
 
 function setupPdfQueue(queueName, res) {
   sendSse(res, 'log', `==> Registering ${queueName} CUPS queue...`);
-  const lpadmin = spawn('docker', [
-    'exec', 'ps-cups',
+  const ad = execIn('ps-cups', [
     'lpadmin', '-p', queueName, '-E', '-v', 'cups-pdf:/', '-P', '/usr/share/ppd/cups-pdf/CUPS-PDF_opt.ppd',
     '-o', 'printer-is-shared=true',
   ]);
+  const lpadmin = spawn(ad.cmd, ad.args);
   lpadmin.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
   lpadmin.on('close', code => {
     if (code !== 0) { sendSse(res, 'error', `lpadmin exited ${code}`); res.end(); return; }
@@ -330,18 +369,20 @@ function setupXpsQueue(queueName, res) {
     'gs -dNOPAUSE -dBATCH -sDEVICE=xpswrite -sOutputFile="$OUT" "$1" 2>/dev/null && rm -f "$1"',
   ].join('\n');
 
-  const writeScript = spawn('docker', [
-    'exec', 'ps-cups', 'sh', '-c',
+  const ws = execIn('ps-cups', [
+    'sh', '-c',
     `printf '%s\n' ${JSON.stringify(postScript)} > /usr/local/bin/cups-pdf-xps.sh && chmod +x /usr/local/bin/cups-pdf-xps.sh`,
   ]);
+  const writeScript = spawn(ws.cmd, ws.args);
 
   writeScript.on('close', () => {
     // Add PostProcessing line to cups-pdf.conf (idempotent grep+append)
-    const patchConf = spawn('docker', [
-      'exec', 'ps-cups', 'sh', '-c',
+    const pc = execIn('ps-cups', [
+      'sh', '-c',
       'grep -q "^PostProcessing" /etc/cups/cups-pdf.conf 2>/dev/null' +
       ' || echo "PostProcessing /usr/local/bin/cups-pdf-xps.sh" >> /etc/cups/cups-pdf.conf',
     ]);
+    const patchConf = spawn(pc.cmd, pc.args);
     patchConf.on('close', () => setupPdfQueue(queueName, res));
   });
 }
@@ -355,10 +396,13 @@ function runTasks(tasks, res) {
       return;
     }
     const { container, packages, label } = tasks[idx++];
-    sendSse(res, 'log', `==> Installing ${label} (${packages.join(' ')}) in ${container}...`);
-    const child = spawn('docker', [
-      'exec', container, 'apt-get', 'install', '-y', '--no-install-recommends', ...packages,
-    ], { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+    const target = isNative() ? 'host' : container;
+    sendSse(res, 'log', `==> Installing ${label} (${packages.join(' ')}) on ${target}...`);
+    const inst = execIn(container, [
+      'apt-get', 'install', '-y', '--no-install-recommends', ...packages,
+    ]);
+    const child = spawn(inst.cmd, inst.args,
+      { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
     child.stdout.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
     child.stderr.on('data', d => sendSse(res, 'log', d.toString().trimEnd()));
     child.on('error', err => {
@@ -449,7 +493,7 @@ router.post('/rclone-auth', (req, res) => {
 
 router.post('/build', (req, res) => {
   const { config } = req.body || {};
-  const dotenvPath  = process.env.DOTENV_PATH  || '/config/.env';
+  const dotenvPath  = process.env.DOTENV_PATH  || (isNative() ? '/etc/printershare/portal.env' : '/config/.env');
   const composeFile = process.env.COMPOSE_FILE || '/config/docker-compose.yml';
 
   if (config) {
@@ -465,6 +509,20 @@ router.post('/build', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   sendSse(res, 'log', '==> Writing configuration...');
+
+  // Native LXC: services are installed and managed by scripts/proxmox/install.sh.
+  // The wizard's job at this point is just to persist the .env — no rebuild step.
+  if (isNative()) {
+    sendSse(res, 'log', '==> Native deployment — settings will take effect on next service restart.');
+    sendSse(res, 'log', `    Config written to ${dotenvPath}`);
+    sendSse(res, 'log', '    Run `systemctl restart printershare-portal` (or use Settings → Services) to apply.');
+    const state = loadState();
+    state.completed = true;
+    saveState(state);
+    sendSse(res, 'complete', 'Setup complete! Restart services from the Services page to apply all settings.');
+    res.end();
+    return;
+  }
 
   sendSse(res, 'log', '==> Applying settings (ensuring all services are up)...');
 

@@ -6,8 +6,9 @@ const path   = require('node:path');
 const fs     = require('node:fs');
 const os     = require('node:os');
 const { spawnSync } = require('node:child_process');
+const { isNative } = require('../lib/deployment');
 
-const CUPS_HOST = process.env.CUPS_HOST || 'host.docker.internal';
+const CUPS_HOST = process.env.CUPS_HOST || (isNative() ? '127.0.0.1' : 'host.docker.internal');
 const CUPS_PORT = Number.parseInt(process.env.CUPS_PORT || '631', 10);
 
 function run(command, args, timeout = 5000) {

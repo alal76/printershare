@@ -23,14 +23,7 @@
  */
 
 const { spawnSync } = require('node:child_process');
-
-/**
- * When `CUPS_LOCAL=1` (native install: portal + cupsd on the same host)
- * we invoke the CUPS CLI directly.  Otherwise we shell into the cups
- * container via `docker exec` (the original Docker-Compose deployment).
- */
-const CUPS_LOCAL = process.env.CUPS_LOCAL === '1';
-const CUPS_CONTAINER = process.env.CUPS_CONTAINER || 'ps-cups';
+const { cupsCmd } = require('./deployment');
 
 /** Sequential lock chain — every withScanLock() awaits the previous one. */
 let chain = Promise.resolve();
@@ -49,9 +42,7 @@ let lastFinishedAt = null;
  * Returns stdout (trimmed) or throws.
  */
 function runCups(args, timeout = 10_000) {
-  const [cmd, cmdArgs] = CUPS_LOCAL
-    ? [args[0], args.slice(1)]
-    : ['docker', ['exec', CUPS_CONTAINER, ...args]];
+  const { cmd, args: cmdArgs } = cupsCmd(args);
   const r = spawnSync(cmd, cmdArgs, {
     encoding: 'utf8',
     timeout,

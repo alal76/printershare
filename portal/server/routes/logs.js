@@ -1,18 +1,21 @@
 'use strict';
 
 const router = require('express').Router();
-const { spawn } = require('node:child_process');
+const { streamLogs, SERVICE_MAP } = require('../lib/deployment');
 
-const ALLOWED_SERVICES = new Set([
-  'ps-cups', 'ps-ipp-usb', 'ps-scanservjs', 'ps-samba',
-  'ps-nfs', 'ps-nginx', 'ps-portal', 'ps-paperless',
-  'ps-paperless-db', 'ps-paperless-redis', 'ps-tailscale', 'ps-cloudflared',
-]);
+// Accept both logical names (`cups`) and legacy container names (`ps-cups`)
+// for back-compat with the existing API surface.
+const ALIAS = {};
+for (const name of Object.keys(SERVICE_MAP)) {
+  ALIAS[name] = name;
+  if (SERVICE_MAP[name].container) ALIAS[SERVICE_MAP[name].container] = name;
+}
 
-// GET /api/v1/logs/:service — SSE stream of docker logs --follow
+// GET /api/v1/logs/:service — SSE stream of follow logs (docker logs or journalctl)
 router.get('/:service', (req, res) => {
   const { service } = req.params;
-  if (!ALLOWED_SERVICES.has(service)) {
+  const logical = ALIAS[service];
+  if (!logical) {
     return res.status(400).json({ error: 'Unknown service' });
   }
 
@@ -22,7 +25,13 @@ router.get('/:service', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  const child = spawn('docker', ['logs', '--follow', `--tail=${lines}`, service]);
+  let child;
+  try {
+    child = streamLogs(logical, lines);
+  } catch (err) {
+    res.write(`data: ${JSON.stringify({ line: `ERROR: ${err.message}` })}\n\n`);
+    return res.end();
+  }
 
   const send = data => res.write(`data: ${JSON.stringify({ line: data })}\n\n`);
 

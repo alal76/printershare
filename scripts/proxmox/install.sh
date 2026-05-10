@@ -282,6 +282,10 @@ npm run build --silent
 mkdir -p "$REPO_DIR/portal/public"
 cp -rf "$REPO_DIR/portal/dist/." "$REPO_DIR/portal/public/"
 
+# Persistent state + config dirs (referenced by the unit's Environment= lines).
+mkdir -p /var/lib/printershare/portal-data /etc/printershare
+[ -f /etc/printershare/portal.env ] || : >/etc/printershare/portal.env
+
 cat >/etc/systemd/system/printershare-portal.service <<UNIT
 [Unit]
 Description=PrinterShare Portal (Express + Vue)
@@ -295,11 +299,14 @@ Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
 Environment=PORT=$PORTAL_PORT
+Environment=DEPLOYMENT_MODE=native
 Environment=CUPS_LOCAL=1
 Environment=CUPS_HOST=127.0.0.1
 Environment=CUPS_PORT=631
 Environment=SCANSERVJS_URL=http://127.0.0.1:$SCANSERVJS_PORT
 Environment=SCANS_PATH=$SCANS_DIR
+Environment=PORTAL_DATA_DIR=/var/lib/printershare/portal-data
+Environment=DOTENV_PATH=/etc/printershare/portal.env
 User=root
 
 [Install]

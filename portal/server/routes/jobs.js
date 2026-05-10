@@ -15,14 +15,10 @@
 const router = require('express').Router();
 const { spawnSync } = require('node:child_process');
 const { getJobStatus } = require('../lib/device-lock');
-
-const CUPS_LOCAL = process.env.CUPS_LOCAL === '1';
-const CUPS_CONTAINER = process.env.CUPS_CONTAINER || 'ps-cups';
+const { cupsCmd } = require('../lib/deployment');
 
 function runLpstat(args, timeout = 5_000) {
-  const [cmd, cmdArgs] = CUPS_LOCAL
-    ? ['lpstat', args]
-    : ['docker', ['exec', CUPS_CONTAINER, 'lpstat', ...args]];
+  const { cmd, args: cmdArgs } = cupsCmd(['lpstat', ...args]);
   const r = spawnSync(cmd, cmdArgs, { encoding: 'utf8', timeout });
   if (r.status !== 0) return '';
   return (r.stdout || '').trim();

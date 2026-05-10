@@ -5,9 +5,10 @@ const fs     = require('node:fs');
 const path   = require('node:path');
 const mime   = require('mime-types');
 const { withScanLock } = require('../lib/device-lock');
+const { isNative } = require('../lib/deployment');
 
 const SCANS_PATH  = process.env.SCANS_PATH || '/scans';
-const SCANSERVJS_URL = process.env.SCANSERVJS_URL || 'http://ps-scanservjs:8080';
+const SCANSERVJS_URL = process.env.SCANSERVJS_URL || (isNative() ? 'http://127.0.0.1:8080' : 'http://ps-scanservjs:8080');
 
 const MAX_PREVIEW = 100; // max files to list
 
