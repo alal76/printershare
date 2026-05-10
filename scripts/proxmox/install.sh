@@ -194,8 +194,9 @@ if [[ -n "$PRINTER_URI" ]] && ! lpstat -p 2>/dev/null | grep -q '^printer .* USB
     info "Adding CUPS queue $PRINTER_NAME → $PRINTER_URI"
     if ! lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -m everywhere 2>/dev/null; then
         # Fall back to Samsung generic PPD from ULD if everywhere fails.
-        PPD="$(find /opt/Samsung/mfp/share/ppd /usr/share/ppd -name '*SCX-3400*' 2>/dev/null | head -1)"
-        [[ -z "$PPD" ]] && PPD="$(find /opt/Samsung/mfp/share/ppd /usr/share/ppd -iname '*samsung*scx*' 2>/dev/null | head -1)"
+        # The apt-installed ULD lands its PPDs in /usr/share/ppd/suld/.
+        PPD="$(find /usr/share/ppd/suld /opt/Samsung/mfp/share/ppd -name '*SCX-3400*' 2>/dev/null | head -1)"
+        [[ -z "$PPD" ]] && PPD="$(find /usr/share/ppd/suld /opt/Samsung/mfp/share/ppd -iname '*samsung*scx*' 2>/dev/null | head -1)"
         if [[ -n "$PPD" ]]; then
             lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD" || \
                 warn "lpadmin failed with PPD $PPD"
@@ -395,12 +396,21 @@ fi
 # ── Enable + (re)start the new units ────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now scanservjs.service
-systemctl enable --now airsane.service
+# NOTE: airsane is intentionally NOT enabled. The Samsung ULD's smfp SANE
+# backend uses libusb in a way that segfaults inside airsaned (it dereferences
+# a freed device handle when libusb_get_device_descriptor races the smfp
+# init). The crash leaves the USB endpoint in a half-claimed state, which
+# also breaks subsequent scanimage calls until a USB reset. scanservjs uses
+# the same backend but spawns scanimage as a subprocess, so the crash (if
+# any) is isolated. Until upstream airsane gains an option to skip smfp or
+# we patch it, we ship without it. Apple AirScan still works via the eSCL
+# proxy in nginx → scanservjs at /escl/ (TODO).
+systemctl disable airsane.service 2>/dev/null || true
+systemctl mask airsane.service 2>/dev/null || true
 systemctl enable --now printershare-portal.service
 # On re-runs (git pull → rebuild), the units exist and are running but with
 # stale code; force a restart so the new build/config takes effect.
 systemctl restart scanservjs.service
-systemctl restart airsane.service
 systemctl restart printershare-portal.service
 
 # ── Summary ─────────────────────────────────────────────────────────────────
