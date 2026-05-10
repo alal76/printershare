@@ -93,8 +93,11 @@ services:
     volumes:
       - cups-config:/etc/cups
       - cups-ppd:/usr/share/cups/model
-    devices:
+      # Bind-mount (not `devices:`) so it tolerates an empty /dev/bus/usb at
+      # startup; new USB devices appear via the bind mount on hot-plug.
       - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - 'c 189:* rmw'   # USB bus character devices
     environment:
       CUPSADMIN:    ${CUPS_ADMIN_USER:-admin}
       CUPSPASSWORD: ${CUPS_ADMIN_PASS:-changeme}
@@ -139,8 +142,11 @@ services:
       - ${SCANS_HOST_PATH:-/srv/printershare/scans}:/app/data/output
       - ./scanservjs/config.js:/app/config/config.js:ro
       - rclone-config:/root/.config/rclone
-    devices:
+      # Bind-mount (not `devices:`) so it tolerates an empty /dev/bus/usb at
+      # startup; new USB devices appear via the bind mount on hot-plug.
       - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - 'c 189:* rmw'   # USB bus character devices
     environment:
       RCLONE_GDRIVE_REMOTE:   ${RCLONE_GDRIVE_REMOTE:-gdrive}
       RCLONE_ONEDRIVE_REMOTE: ${RCLONE_ONEDRIVE_REMOTE:-onedrive}
