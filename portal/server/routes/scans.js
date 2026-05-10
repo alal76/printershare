@@ -63,6 +63,55 @@ router.delete('/:filename', (req, res) => {
 });
 
 /**
+ * Coerce a user-friendly param value (e.g. `mode: "Color"`) to one of the
+ * options actually advertised by the device's SANE backend. Backends use
+ * inconsistent labels — generic SANE returns "Color"/"Gray"/"Lineart",
+ * while Samsung's smfp backend returns "Color - 16 Million Colors" /
+ * "Grayscale - 256 Levels" / "Black and White - Line Art". The portal
+ * frontend stays simple and the coercion handles the variants.
+ *
+ * Matches by lowercase prefix / substring against the option labels;
+ * returns the original value if no option list is available (e.g. for
+ * numeric/range features) or no match is found.
+ *
+ * @param {string} requested
+ * @param {{options?: string[]}} feature
+ */
+function coerceOption(requested, feature) {
+  if (!feature || !Array.isArray(feature.options) || feature.options.length === 0) return requested;
+  if (feature.options.includes(requested)) return requested;
+  const needle = String(requested).toLowerCase();
+  const tokens = needle.split(/[\s-]+/).filter(Boolean);
+  const match = feature.options.find(opt => {
+    const lo = String(opt).toLowerCase();
+    return tokens.every(t => lo.includes(t));
+  })
+    ?? feature.options.find(opt => String(opt).toLowerCase().startsWith(needle));
+  return match ?? requested;
+}
+
+/**
+ * Walk `params` and substitute each value with the device-specific
+ * equivalent advertised in `device.features`. scanservjs's feature map
+ * is keyed by SANE option name (`--mode`, `--source`, `--resolution`),
+ * which we map from the request-param keys (`mode`, `source`, `resolution`).
+ *
+ * @param {Record<string, unknown>} params
+ * @param {{features?: Record<string, {options?: string[]}>}} device
+ */
+function coerceParams(params, device) {
+  if (!device?.features) return params;
+  const map = { mode: '--mode', source: '--source', resolution: '--resolution' };
+  const out = { ...params };
+  for (const [k, saneKey] of Object.entries(map)) {
+    if (out[k] != null && device.features[saneKey]) {
+      out[k] = coerceOption(out[k], device.features[saneKey]);
+    }
+  }
+  return out;
+}
+
+/**
  * POST /api/v1/scans/run
  * Body: scanservjs scan request payload
  *   { params: { deviceId?, mode, source, resolution, ... },
@@ -84,7 +133,8 @@ router.post('/run', async (req, res) => {
       const userPayload = req.body ?? {};
       let payload = userPayload;
 
-      // If the caller didn't pin a deviceId, discover it now (under the lock).
+      // If the caller didn't pin a deviceId, discover it now (under the lock)
+      // and coerce request params to values the chosen device actually supports.
       if (!userPayload?.params?.deviceId) {
         const ctxRes = await fetch(`${SCANSERVJS_URL}/api/v1/context`);
         if (!ctxRes.ok) {
@@ -97,7 +147,7 @@ router.post('/run', async (req, res) => {
         }
         payload = {
           ...userPayload,
-          params: { ...userPayload.params, deviceId: device.id },
+          params: { ...coerceParams(userPayload.params || {}, device), deviceId: device.id },
           pipeline: userPayload.pipeline || device.settings?.pipeline?.default,
           filters:  userPayload.filters  ?? [],
           batch:    userPayload.batch    ?? 'none',
