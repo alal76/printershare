@@ -128,20 +128,62 @@ const opts = ref({ resolution: '300', color: 'color', format: 'pdf', source: 'fl
 async function startScan() {
   scanning.value = true
   try {
-    // ScanServJS API via nginx proxy
+    // 1. Fetch context to discover the active SANE device id and pipelines.
+    const ctxRes = await fetch('/scan/api/v1/context')
+    if (!ctxRes.ok) throw new Error(`No scanner available (HTTP ${ctxRes.status})`)
+    const ctx = await ctxRes.json()
+    const device = ctx.devices?.[0]
+    if (!device) throw new Error('No scanner detected. Plug in a USB scanner and reset detection.')
+
+    // 2. Map our simple form options to scanservjs's expected values.
+    //    scanservjs is case-sensitive on mode/source.
+    const modeMap: Record<string, string> = {
+      color:   'Color',
+      gray:    'Gray',
+      lineart: 'Lineart',
+    }
+    const sourceMap: Record<string, string> = {
+      flatbed: 'Flatbed',
+      adf:     'ADF',
+    }
+    const mode   = modeMap[opts.value.color]   ?? 'Color'
+    const source = sourceMap[opts.value.source] ?? 'Flatbed'
+
+    // 3. Pick a pipeline matching the chosen output format.
+    const pipelines: string[] = device.settings?.pipeline?.options ?? []
+    const fmt = opts.value.format
+    const pickPipeline = (): string => {
+      const find = (re: RegExp) => pipelines.find(p => re.test(p))
+      if (fmt === 'pdf')  return find(/^PDF .*high-quality/i) ?? find(/^PDF/i) ?? pipelines[0]
+      if (fmt === 'jpg')  return find(/^JPG .*high-quality/i) ?? find(/^JPG/i) ?? pipelines[0]
+      if (fmt === 'png')  return find(/^PNG/i) ?? pipelines[0]
+      if (fmt === 'tiff') return find(/^TIF/i) ?? pipelines[0]
+      return device.settings?.pipeline?.default ?? pipelines[0]
+    }
+    const pipeline = pickPipeline()
+    if (!pipeline) throw new Error('Scanner has no available pipelines')
+
+    // 4. POST the scan request.
     const r = await fetch('/scan/api/v1/scan', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         params: {
+          deviceId:   device.id,
           resolution: Number(opts.value.resolution),
-          mode:       opts.value.color,
-          format:     opts.value.format,
-          source:     opts.value.source,
+          mode,
+          source,
         },
+        pipeline,
+        filters: [],
+        batch:   'none',
+        index:   1,
       }),
     })
-    if (!r.ok) throw new Error(`Scan failed: HTTP ${r.status}`)
+    if (!r.ok) {
+      const text = await r.text().catch(() => '')
+      throw new Error(`Scan failed: HTTP ${r.status}${text ? ` — ${text.slice(0, 200)}` : ''}`)
+    }
     toast.success('Scan complete', 'File saved to scan folder.')
     await scanStore.fetchFiles()
   } catch (err: unknown) {
