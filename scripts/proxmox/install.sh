@@ -263,10 +263,14 @@ else
     warn "NFS kernel module unavailable — skipping NFS export"
 fi
 
-# ── Enable + start the new units ────────────────────────────────────────────
+# ── Enable + (re)start the new units ────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now scanservjs.service
 systemctl enable --now printershare-portal.service
+# On re-runs (git pull → rebuild), the units exist and are running but with
+# stale code; force a restart so the new build/config takes effect.
+systemctl restart scanservjs.service
+systemctl restart printershare-portal.service
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 ip="$(hostname -I | awk '{print $1}')"
