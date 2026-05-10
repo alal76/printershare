@@ -5,7 +5,10 @@ const { execSync, execFile } = require('node:child_process');
 
 const CUPS_HOST           = process.env.CUPS_HOST           || 'host.docker.internal';
 const CUPS_PORT           = Number.parseInt(process.env.CUPS_PORT  || '631', 10);
-const SCANSERVJS_INTERNAL = process.env.SCANSERVJS_INTERNAL || 'http://ps-scanservjs:8080';
+// SCANSERVJS_INTERNAL is the Docker-compose-friendly default; SCANSERVJS_URL
+// is the unified env name (also read by scans.js) used by the native LXC
+// installer. Check both so health works in both deployments.
+const SCANSERVJS_INTERNAL = process.env.SCANSERVJS_INTERNAL || process.env.SCANSERVJS_URL || 'http://ps-scanservjs:8080';
 const PAPERLESS_INTERNAL  = process.env.PAPERLESS_INTERNAL  || 'http://ps-paperless:8000';
 
 /**
