@@ -28,7 +28,8 @@ SCANSERVJS_DIR="/opt/scanservjs"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 RCLONE_VERSION="${RCLONE_VERSION:-v1.67.0}"
 SAMBA_USER="${SAMBA_USER:-scanner}"
-SAMBA_PASS="${SAMBA_PASS:-scanner123}"
+# Generate a secure random Samba password on first run unless caller pre-sets one.
+SAMBA_PASS="${SAMBA_PASS:-$(openssl rand -hex 12)}"
 PORTAL_PORT="${PORTAL_PORT:-3000}"
 SCANSERVJS_PORT="${SCANSERVJS_PORT:-8080}"
 AIRSANE_PORT="${AIRSANE_PORT:-8090}"
@@ -328,6 +329,20 @@ cp -rf "$REPO_DIR/portal/dist/." "$REPO_DIR/portal/public/"
 mkdir -p /var/lib/printershare/portal-data /etc/printershare
 [ -f /etc/printershare/portal.env ] || : >/etc/printershare/portal.env
 
+# ── Auto-generate portal credentials on first install ───────────────────────
+# Write each key only if it is not already present (idempotent on re-runs).
+_env_set_default() {
+    local key="$1" val="$2" file="/etc/printershare/portal.env"
+    grep -q "^${key}=" "$file" || echo "${key}=${val}" >>"$file"
+}
+_env_set_default PORTAL_AUTH    "true"
+_env_set_default PORTAL_USER    "admin"
+_env_set_default PORTAL_PASS    "$(openssl rand -hex 12)"
+_env_set_default PORTAL_SECRET  "$(openssl rand -hex 32)"
+# Cache the generated values so the summary can display them.
+PORTAL_PASS_SHOW="$(grep '^PORTAL_PASS=' /etc/printershare/portal.env | cut -d= -f2-)"
+PORTAL_USER_SHOW="$(grep '^PORTAL_USER=' /etc/printershare/portal.env | cut -d= -f2-)"
+
 cat >/etc/systemd/system/printershare-portal.service <<UNIT
 [Unit]
 Description=PrinterShare Portal (Express + Vue)
@@ -467,7 +482,9 @@ cat <<EOF
   CUPS admin  : http://$ip:631/   (loopback by default)
   Scanservjs  : http://$ip/scan/
   AirSane     : http://$ip/escl/  (eSCL/AirScan on Bonjour _uscan._tcp)
-  Samba share : \\\\$ip\\Scans     (user: $SAMBA_USER)
+  Samba share : \\\\$ip\\Scans     (user: $SAMBA_USER / pass: $SAMBA_PASS)
+  Portal login: user: $PORTAL_USER_SHOW   pass: $PORTAL_PASS_SHOW
+               (auth ON — change via Settings or edit /etc/printershare/portal.env)
 
   Detected scanners:
 $(scanimage -L 2>/dev/null | sed 's/^/    /' || echo '    (none yet — plug in printer/scanner)')

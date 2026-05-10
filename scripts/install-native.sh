@@ -107,10 +107,14 @@ systemctl enable --now saned.socket 2>/dev/null || \
     systemctl enable --now saned 2>/dev/null || \
     warn "saned service not found — start manually"
 
+# Generate secure random credentials on first install (override via env vars).
+SAMBA_USER="${SAMBA_USER:-scanner}"
+SAMBA_PASS="${SAMBA_PASS:-$(openssl rand -hex 12)}"
+PORTAL_PASS="${PORTAL_PASS:-$(openssl rand -hex 12)}"
+PORTAL_SECRET="${PORTAL_SECRET:-$(openssl rand -hex 32)}"
+
 # ── Samba ─────────────────────────────────────────────────────────────────
 info "Configuring Samba..."
-SAMBA_USER="${SAMBA_USER:-scanner}"
-SAMBA_PASS="${SAMBA_PASS:-scanner123}"
 id "$SAMBA_USER" &>/dev/null || useradd -r -s /usr/sbin/nologin "$SAMBA_USER"
 printf "%s\n%s\n" "$SAMBA_PASS" "$SAMBA_PASS" | smbpasswd -a -s "$SAMBA_USER"
 
@@ -175,6 +179,22 @@ if command -v ufw &>/dev/null; then
 fi
 
 SERVER_IP="$(hostname -I | awk '{print $1}')"
+
+# Write portal env file with generated secrets (idempotent).
+PORTAL_ENV="${PORTAL_ENV:-/etc/printershare/portal.env}"
+mkdir -p "$(dirname "$PORTAL_ENV")"
+[ -f "$PORTAL_ENV" ] || : >"$PORTAL_ENV"
+_env_set_default() {
+    local key="$1" val="$2"
+    grep -q "^${key}=" "$PORTAL_ENV" || echo "${key}=${val}" >>"$PORTAL_ENV"
+}
+_env_set_default PORTAL_AUTH   "true"
+_env_set_default PORTAL_USER   "admin"
+_env_set_default PORTAL_PASS   "$PORTAL_PASS"
+_env_set_default PORTAL_SECRET "$PORTAL_SECRET"
+PORTAL_PASS_SHOW="$(grep '^PORTAL_PASS=' "$PORTAL_ENV" | cut -d= -f2-)"
+PORTAL_USER_SHOW="$(grep '^PORTAL_USER=' "$PORTAL_ENV" | cut -d= -f2-)"
+
 cat <<EOF
 
 ════════════════════════════════════════════════════
@@ -182,8 +202,10 @@ INSTALL COMPLETE  —  ${SERVER_IP}
 ════════════════════════════════════════════════════
  Scanner UI  : http://${SERVER_IP}/
  CUPS admin  : http://${SERVER_IP}:631/
- Samba share : \\\\${SERVER_IP}\\Scans  (${SAMBA_USER})
+ Samba share : \\\\${SERVER_IP}\\Scans  (${SAMBA_USER} / ${SAMBA_PASS})
  NFS mount   : ${SERVER_IP}:/srv/printershare/scans
+ Portal auth : user=${PORTAL_USER_SHOW}  pass=${PORTAL_PASS_SHOW}
+               (auth enabled — change via Settings or edit ${PORTAL_ENV})
 
  Optional: bash scripts/setup-rclone.sh
  Optional: sudo bash scripts/install-usbip-server.sh

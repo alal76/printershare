@@ -2,7 +2,8 @@
 
 const crypto = require('node:crypto');
 
-const AUTH_ENABLED = String(process.env.PORTAL_AUTH || 'false').toLowerCase() === 'true';
+// Auth is ENABLED by default. Set PORTAL_AUTH=false only on isolated LANs.
+const AUTH_ENABLED = String(process.env.PORTAL_AUTH ?? 'true').toLowerCase() === 'true';
 const AUTH_USER = process.env.PORTAL_USER || 'admin';
 const AUTH_PASS = process.env.PORTAL_PASS || process.env.PORTAL_SECRET || 'changeme';
 const AUTH_SECRET = process.env.PORTAL_SECRET || 'changeme-portal-secret';
@@ -31,7 +32,11 @@ function verifySessionToken(token) {
   const [payloadB64, sig] = token.split('.');
   if (!payloadB64 || !sig) return null;
   const expected = sign(payloadB64);
-  if (sig !== expected) return null;
+  // Timing-safe comparison prevents HMAC length/timing oracle attacks.
+  const sigBuf      = Buffer.from(sig,      'base64url');
+  const expectedBuf = Buffer.from(expected, 'base64url');
+  if (sigBuf.length !== expectedBuf.length ||
+      !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
 
   try {
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));

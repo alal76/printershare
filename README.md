@@ -301,6 +301,35 @@ The script is idempotent and safe to re-run.
 
 ---
 
+## Security
+
+> **Before exposing PrinterShare to the internet**, read [SECURITY.md](SECURITY.md) in full.
+
+The short version:
+
+1. **Authentication is on by default.** Both install scripts generate a random
+   `PORTAL_PASS` and `PORTAL_SECRET` on first run and print them in the summary.
+   Keep them safe — they're stored in `/etc/printershare/portal.env` (native) or
+   your `.env` file (Docker).
+
+2. **Use HTTPS.** Terminate TLS at nginx. For a public domain use Let's Encrypt /
+   Certbot. For LAN use a self-signed cert or the Cloudflare Tunnel profile
+   (`COMPOSE_PROFILES=remote`).  The nginx config ships an HTTPS block commented
+   out in `nginx/nginx.conf` — uncomment and point to your cert.
+
+3. **Restrict ports.** Only ports 80 and 443 (nginx) need to be reachable from
+   untrusted networks. CUPS (631), saned (6566), Samba (445), and NFS (2049)
+   must **not** be exposed to the internet.
+
+4. **Change Samba credentials** if you didn't accept the auto-generated ones:
+   `smbpasswd -a scanner`.
+
+The install scripts never write secrets to git — `.env` and `portal.env` are
+`.gitignore`d. See [SECURITY.md](SECURITY.md) for the full hardening checklist and
+architecture overview.
+
+---
+
 ## API Reference
 
 Base path: `/api/v1`

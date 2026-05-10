@@ -178,8 +178,7 @@
                 class="flex gap-2"
               >
                 <span class="w-4 h-4 rounded-full bg-primary-100 text-primary-700 text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">{{ i + 1 }}</span>
-                <!-- eslint-disable-next-line vue/no-v-html -->
-                <p v-html="step"></p>
+                <p><SafeStepText :text="step" /></p>
               </div>
             </div>
           </div>
@@ -253,9 +252,10 @@ import {
   ShieldIcon, CloudIcon, ChevronDownIcon,
   AppleIcon, MonitorIcon, SmartphoneIcon, TerminalIcon,
 } from 'lucide-vue-next'
-import AppShell   from '@/components/layout/AppShell.vue'
-import Card       from '@/components/ui/Card.vue'
+import AppShell    from '@/components/layout/AppShell.vue'
+import Card        from '@/components/ui/Card.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
+import SafeStepText from '@/components/ui/SafeStepText.vue'
 import { useSystemStore } from '@/stores/system'
 import { useToastStore }  from '@/stores/toast'
 
