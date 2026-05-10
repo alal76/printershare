@@ -178,11 +178,14 @@ run_in_ct_installer() {
     '
 
     msg_info "Running in-LXC installer from $install_url"
+    # Append a timestamp query string so the raw.githubusercontent.com CDN
+    # never serves a stale cached copy when iterating on install.sh.
+    local nocache_url="${install_url}?nocache=$(date +%s)"
     pct exec "$ctid" -- bash -c "
         set -e
         export REPO_URL='$repo_url'
         export REPO_BRANCH='$repo_branch'
-        curl -fsSL '$install_url' | bash
+        curl -fsSL '$nocache_url' | bash
     " || die "in-LXC install failed — see CT $ctid console (pct enter $ctid)"
 }
 
@@ -262,6 +265,29 @@ ask() {
     echo "${v:-$def}"
 }
 
+# Prompt for a password twice (silently). Empty input keeps no-password
+# default (use `pct enter <ctid>` from the PVE host to access the CT).
+ask_password() {
+    local p1 p2
+    while true; do
+        read -rsp "    Root password (blank = no password, use 'pct enter $CTID' from PVE): " p1
+        echo
+        if [[ -z "$p1" ]]; then
+            ROOT_PASSWORD=""
+            return
+        fi
+        read -rsp "    Confirm root password: " p2
+        echo
+        if [[ "$p1" == "$p2" ]]; then
+            ROOT_PASSWORD="$p1"
+            return
+        fi
+        msg_warn "Passwords didn't match, try again."
+    done
+}
+
+ROOT_PASSWORD=""
+
 if [[ "$MODE" == "2" ]]; then
     echo
     msg_info "Advanced settings"
@@ -276,6 +302,7 @@ if [[ "$MODE" == "2" ]]; then
     TEMPLATE_STORAGE=$(ask "Template storage" "$TEMPLATE_STORAGE_DEFAULT")
     REPO_URL=$(ask "Git repo URL"        "$REPO_URL_DEFAULT")
     REPO_BRANCH=$(ask "Git branch"       "$REPO_BRANCH_DEFAULT")
+    ask_password
 else
     CTID="$CTID_DEFAULT"
     HOST="$HOSTNAME_DEFAULT"
@@ -288,6 +315,7 @@ else
     TEMPLATE_STORAGE="$TEMPLATE_STORAGE_DEFAULT"
     REPO_URL="$REPO_URL_DEFAULT"
     REPO_BRANCH="$REPO_BRANCH_DEFAULT"
+    ask_password
 fi
 
 # ── Sanity ───────────────────────────────────────────────────────────────────
@@ -316,17 +344,22 @@ msg_ok "Template: $TEMPLATE_REF"
 
 # ── Create container ─────────────────────────────────────────────────────────
 msg_info "Creating CT $CTID ($HOST) — ${CORES}c / ${RAM_MB}MB / ${DISK_GB}GB / $BRIDGE"
-pct create "$CTID" "$TEMPLATE_REF" \
-    --hostname        "$HOST" \
-    --cores           "$CORES" \
-    --memory          "$RAM_MB" \
-    --swap            "$SWAP_MB" \
-    --rootfs          "${STORAGE}:${DISK_GB}" \
-    --net0            "name=eth0,bridge=${BRIDGE},ip=dhcp,ip6=auto" \
-    --features        "nesting=1,keyctl=1" \
-    --unprivileged    0 \
-    --onboot          1 \
+PCT_CREATE_ARGS=(
+    --hostname        "$HOST"
+    --cores           "$CORES"
+    --memory          "$RAM_MB"
+    --swap            "$SWAP_MB"
+    --rootfs          "${STORAGE}:${DISK_GB}"
+    --net0            "name=eth0,bridge=${BRIDGE},ip=dhcp,ip6=auto"
+    --features        "nesting=1,keyctl=1"
+    --unprivileged    0
+    --onboot          1
     --start           0
+)
+if [[ -n "$ROOT_PASSWORD" ]]; then
+    PCT_CREATE_ARGS+=( --password "$ROOT_PASSWORD" )
+fi
+pct create "$CTID" "$TEMPLATE_REF" "${PCT_CREATE_ARGS[@]}"
 msg_ok "CT $CTID created"
 
 # ── Apply passthrough block ─────────────────────────────────────────────────
