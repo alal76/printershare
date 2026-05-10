@@ -161,13 +161,20 @@ function collectSaneUsbDevices() {
 
 /**
  * Look up the CUPS device URI for a given USB vid:pid.
- * Parses `lpinfo -v` lines that look like:
- *   direct usb://Samsung/SCX-3400%20Series?serial=…
- * and matches the manufacturer to the vendor ID.
+ *
+ * Strategy:
+ *  1. Parse `lpinfo -v` for `usb://Make/Model?...` lines whose Make matches
+ *     the vendor ID (preferred — uses CUPS' own device-id query).
+ *  2. Fallback: synthesize the URI from /sys/bus/usb/devices/<n>/{manufacturer,
+ *     product, serial}. CUPS' libusb backend matches URIs against the USB
+ *     descriptor strings, so a synthesized `usb://Samsung/SCX-3400%20Series`
+ *     resolves at print time even when device-ID parsing fails.
+ *
  * @param {string} vidpid
  * @returns {{ uri: string, make: string, model: string } | null}
  */
 function findCupsUriForVidPid(vidpid) {
+  // 1) Authoritative: CUPS lpinfo
   try {
     const out = runCups(['lpinfo', '-v'], 10_000);
     const usbLineRe = /^\s*\S+\s+(usb:\/\/([^/?]+)\/([^?\s]+)(?:\?\S*)?)/gm;
@@ -176,16 +183,69 @@ function findCupsUriForVidPid(vidpid) {
       const [, uri, makeEnc, modelEnc] = m;
       const make  = decodeURIComponent(makeEnc);
       const model = decodeURIComponent(modelEnc);
-      // Skip CUPS' generic placeholder when it can't read the device-id.
       if (make.toLowerCase() === 'unknown') continue;
       if (vidpidMatchesMake(vidpid, make)) {
         return { uri, make, model };
       }
     }
-  } catch {
-    return null;
-  }
+  } catch { /* fall through to sysfs */ }
+
+  // 2) Fallback: read sysfs USB descriptors directly inside the cups container.
+  try {
+    const sysfs = readSysfsUsbDevice(vidpid);
+    if (sysfs) {
+      const make  = shortMakeForVid(vidpid) || sysfs.manufacturer;
+      const model = sysfs.product;
+      const params = sysfs.serial ? `?serial=${encodeURIComponent(sysfs.serial)}` : '';
+      const uri   = `usb://${encodeURIComponent(make)}/${encodeURIComponent(model)}${params}`;
+      return { uri, make, model };
+    }
+  } catch { /* nothing more we can do */ }
+
   return null;
+}
+
+/**
+ * Walk /sys/bus/usb/devices inside the cups container and locate the entry
+ * whose idVendor:idProduct matches `vidpid`.
+ * @param {string} vidpid
+ * @returns {{ manufacturer:string, product:string, serial:string } | null}
+ */
+function readSysfsUsbDevice(vidpid) {
+  const [vid, pid] = vidpid.toLowerCase().split(':');
+  const out = runCups([
+    'sh', '-c',
+    'for d in /sys/bus/usb/devices/[0-9]*-[0-9]*; do ' +
+      '[ -f "$d/idVendor" ] || continue; ' +
+      'v=$(cat "$d/idVendor"); p=$(cat "$d/idProduct"); ' +
+      `if [ "$v" = "${vid}" ] && [ "$p" = "${pid}" ]; then ` +
+        'echo "MFR=$(cat $d/manufacturer 2>/dev/null)"; ' +
+        'echo "PRD=$(cat $d/product 2>/dev/null)"; ' +
+        'echo "SER=$(cat $d/serial 2>/dev/null)"; ' +
+        'break; ' +
+      'fi; ' +
+    'done',
+  ], 5_000);
+
+  const fields = {};
+  for (const line of out.split('\n')) {
+    const m = /^(MFR|PRD|SER)=(.*)$/.exec(line);
+    if (m) fields[m[1]] = m[2].trim();
+  }
+  if (!fields.MFR && !fields.PRD) return null;
+  return {
+    manufacturer: fields.MFR || '',
+    product:      fields.PRD || 'Printer',
+    serial:       fields.SER || '',
+  };
+}
+
+/** Short, CUPS-friendly make string for a known vendor ID. */
+function shortMakeForVid(vidpid) {
+  const vid = vidpid.split(':')[0]?.toLowerCase();
+  const mk = VID_TO_MAKE[vid];
+  if (!mk) return '';
+  return mk.charAt(0).toUpperCase() + mk.slice(1);
 }
 
 /** Map known USB vendor IDs to manufacturer name fragments. */
