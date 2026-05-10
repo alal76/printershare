@@ -229,6 +229,16 @@ fi
 SCANSERVJS_ETC=/etc/scanservjs
 mkdir -p "$SCANSERVJS_ETC"
 cp -f "$REPO_DIR/scanservjs/config.js" "$SCANSERVJS_ETC/config.local.js"
+# The shipped config has Docker's '/app/data/output' baked in. Patch it to
+# point at the host's scans directory so files are visible to Samba, NFS,
+# and the portal's /api/v1/scans listing.
+sed -ri "s|outputDirectory:\s*'[^']*'|outputDirectory: '$SCANS_DIR'|" \
+    "$SCANSERVJS_ETC/config.local.js"
+# Allow the scanservjs system user to write into the scans directory.
+# The package creates user `scanservjs` (group `users`); make the dir
+# world-writable so Samba (smbuser) and the portal can also read/write.
+chown -R scanservjs:users "$SCANS_DIR" 2>/dev/null || true
+chmod 0777 "$SCANS_DIR"
 install -m 755 "$REPO_DIR/scanservjs/scripts/scan-save-upload.sh" /usr/local/bin/scan-save-upload.sh
 # Remove any stale unit from a previous (broken) git-build install.
 if [[ -f /etc/systemd/system/scanservjs.service ]] && \
