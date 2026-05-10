@@ -41,6 +41,12 @@ fi
 echo "==> Restarting services..."
 docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
 
+# Single-file bind mounts (e.g. nginx.conf) are pinned to the inode they had
+# when the container started.  `git pull` rewrites those files (new inode),
+# so containers that bind-mount them must be restarted to see the change.
+echo "==> Restarting containers with bind-mounted config files..."
+docker compose --env-file "${ENV_FILE}" restart nginx >/dev/null 2>&1 || true
+
 echo "==> Waiting for health check..."
 sleep 5
 "${SCRIPT_DIR}/health-check.sh"
