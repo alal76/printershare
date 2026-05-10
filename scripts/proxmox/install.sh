@@ -51,6 +51,16 @@ else
     git -C "$REPO_DIR" reset --hard "origin/$REPO_BRANCH"
 fi
 
+# ── Locale (avoid perl warnings during apt) ─────────────────────────────────
+if ! locale -a 2>/dev/null | grep -qi '^en_US\.utf-\?8$'; then
+    info "Generating en_US.UTF-8 locale"
+    apt-get install -y --no-install-recommends locales >/dev/null
+    sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+    locale-gen en_US.UTF-8 >/dev/null
+    update-locale LANG=en_US.UTF-8
+fi
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
 # ── Base packages ───────────────────────────────────────────────────────────
 info "Installing core packages (cups, avahi, sane, nginx, samba)"
 apt-get update -qq
@@ -138,7 +148,7 @@ grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
 # ── Scanservjs ──────────────────────────────────────────────────────────────
 info "Installing scanservjs"
 if [[ ! -d "$SCANSERVJS_DIR/.git" ]]; then
-    git clone --depth 1 --branch release https://github.com/sbs20/scanservjs.git "$SCANSERVJS_DIR"
+    git clone --depth 1 https://github.com/sbs20/scanservjs.git "$SCANSERVJS_DIR"
 else
     git -C "$SCANSERVJS_DIR" pull --ff-only || true
 fi
