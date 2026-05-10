@@ -260,11 +260,64 @@
       </h2>
       <FileList :max="5" />
     </section>
+
+    <!-- ── Active jobs (print + scan) ───────────────────────────────────── -->
+    <section class="mt-6">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+        Active Jobs
+      </h2>
+      <Card data-testid="active-jobs-card">
+        <div class="grid sm:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="text-gray-500 mb-1">
+              Print queue
+            </p>
+            <p class="text-xl font-bold text-gray-900">
+              {{ jobs?.print.count ?? 0 }}
+              <span class="text-xs font-normal text-gray-400 ml-1">active</span>
+            </p>
+            <ul
+              v-if="(jobs?.print.jobs.length ?? 0) > 0"
+              class="mt-2 space-y-1 text-xs text-gray-600"
+            >
+              <li
+                v-for="j in jobs?.print.jobs.slice(0, 5)"
+                :key="j.id"
+                class="truncate"
+              >
+                {{ j.name }} — {{ j.state }}
+              </li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-gray-500 mb-1">
+              Scan activity
+            </p>
+            <p class="text-xl font-bold text-gray-900">
+              {{ jobs?.scan.active ?? 0 }}
+              <span
+                v-if="(jobs?.scan.queued ?? 0) > 0"
+                class="text-xs font-normal text-amber-600 ml-1"
+              >+{{ jobs?.scan.queued }} queued</span>
+              <span
+                v-else
+                class="text-xs font-normal text-gray-400 ml-1"
+              >active</span>
+            </p>
+            <p class="text-xs text-gray-500 mt-2">
+              Completed: {{ jobs?.scan.completed ?? 0 }}<span
+                v-if="jobs?.scan.lastDurationMs"
+              > · last {{ Math.round((jobs.scan.lastDurationMs) / 100) / 10 }}s</span>
+            </p>
+          </div>
+        </div>
+      </Card>
+    </section>
   </AppShell>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
   ScanIcon, PrinterIcon, UsbIcon, ShareIcon,
   CheckCircleIcon, AlertCircleIcon, PrinterIcon as PrintIcon,
@@ -279,11 +332,27 @@ import { useSystemStore } from '@/stores/system'
 import { useScanStore }   from '@/stores/scan'
 import { usePrintStore }  from '@/stores/print'
 import { useDevicesStore } from '@/stores/devices'
+import { useApi }         from '@/composables/useApi'
+
+interface JobsSnapshot {
+  print: { jobs: Array<{ id: string; name: string; state: string }>; count: number }
+  scan:  { active: number; queued: number; completed: number; lastDurationMs: number; lastStartedAt: string | null; lastFinishedAt: string | null }
+}
 
 const system = useSystemStore()
 const scan   = useScanStore()
 const print  = usePrintStore()
 const devices = useDevicesStore()
+const jobsApi = useApi<JobsSnapshot>()
+const jobs = ref<JobsSnapshot | null>(null)
+let jobsTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshJobs() {
+  try {
+    const data = await jobsApi.call('/api/v1/jobs', { silent: true })
+    if (data) jobs.value = data
+  } catch { /* ignore — surfaced via service health */ }
+}
 
 const systemInfo = computed(() => {
   const raw = system.info
@@ -304,9 +373,14 @@ onMounted(async () => {
     scan.fetchFiles(),
     print.fetchQueue(),
     devices.fetchDevices(),
+    refreshJobs(),
   ])
+  jobsTimer = setInterval(refreshJobs, 5000)
 })
-onUnmounted(() => system.stopPolling())
+onUnmounted(() => {
+  system.stopPolling()
+  if (jobsTimer) clearInterval(jobsTimer)
+})
 
 const uptimeLabel = computed(() => {
   const secs = Number(systemInfo.value.uptime || 0)

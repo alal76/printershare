@@ -69,6 +69,7 @@ app.use('/api/v1/settings', require('./routes/settings'));
 app.use('/api/v1/logs',     require('./routes/logs'));
 app.use('/api/v1/services', require('./routes/services'));
 app.use('/api/v1/devices',  require('./routes/devices'));
+app.use('/api/v1/jobs',     require('./routes/jobs'));
 
 // ── Quick healthcheck endpoint (used by Docker HEALTHCHECK instruction) ───────
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));

@@ -31,6 +31,8 @@ SAMBA_USER="${SAMBA_USER:-scanner}"
 SAMBA_PASS="${SAMBA_PASS:-scanner123}"
 PORTAL_PORT="${PORTAL_PORT:-3000}"
 SCANSERVJS_PORT="${SCANSERVJS_PORT:-8080}"
+AIRSANE_PORT="${AIRSANE_PORT:-8090}"
+AIRSANE_DIR="/opt/AirSane"
 
 info()  { echo -e "\e[1;32m==>\e[0m $*"; }
 warn()  { echo -e "\e[1;33mWARN:\e[0m $*"; }
@@ -63,7 +65,8 @@ apt-get install -y --no-install-recommends \
     nfs-kernel-server \
     nginx \
     usbutils \
-    unzip jq build-essential >/dev/null
+    unzip jq build-essential \
+    cmake g++ pkg-config libsane-dev libavahi-client-dev libjpeg-dev libpng-dev zlib1g-dev libusb-1.0-0-dev >/dev/null
 
 # Blacklist usblp — it competes with CUPS/SANE for the USB interface.
 echo "blacklist usblp" >/etc/modprobe.d/blacklist-usblp.conf
@@ -156,6 +159,46 @@ User=root
 WantedBy=multi-user.target
 UNIT
 
+# ── AirSane (eSCL / AirScan bridge for SANE scanners) ───────────────────────
+# Exposes /etc/sane.d backends as Apple AirScan / Mopria eSCL endpoints with
+# Bonjour _uscan._tcp + _uscans._tcp registration, so macOS / iOS / Windows
+# discover the scanner natively (no driver install).
+info "Installing AirSane (eSCL bridge)"
+if [[ ! -d "$AIRSANE_DIR/.git" ]]; then
+    git clone --depth 1 https://github.com/SimulPiscator/AirSane.git "$AIRSANE_DIR"
+else
+    git -C "$AIRSANE_DIR" fetch --depth 1 origin
+    git -C "$AIRSANE_DIR" reset --hard origin/HEAD
+fi
+if [[ ! -x /usr/local/bin/airsaned ]] || [[ "$AIRSANE_DIR/.git/HEAD" -nt /usr/local/bin/airsaned ]]; then
+    info "Building AirSane"
+    mkdir -p "$AIRSANE_DIR/build"
+    ( cd "$AIRSANE_DIR/build" && cmake .. -DCMAKE_BUILD_TYPE=Release >/dev/null && make -j"$(nproc)" >/dev/null )
+    install -m 755 "$AIRSANE_DIR/build/airsaned" /usr/local/bin/airsaned
+fi
+
+cat >/etc/systemd/system/airsane.service <<UNIT
+[Unit]
+Description=AirSane — eSCL / AirScan bridge for SANE
+After=network.target avahi-daemon.service saned.socket
+Wants=avahi-daemon.service
+# Both AirSane and scanservjs talk to SANE backends, so they can't scan at
+# the same time on a single-interface USB device. The DeviceLock layer in
+# the portal disables CUPS during scans; AirSane / scanservjs themselves
+# serialize on the SANE handle, which is fine.
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/airsaned --listen-port=$AIRSANE_PORT --interface=any --mdns-announce=true --web-interface=true --hotplug=true
+Restart=on-failure
+RestartSec=3
+# Needs access to /dev/bus/usb (provided by the LXC passthrough block).
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 # ── Portal (Express + built Vue assets) ─────────────────────────────────────
 info "Building portal"
 cd "$REPO_DIR/portal"
@@ -225,6 +268,16 @@ server {
         proxy_set_header   Host              \$host;
         proxy_set_header   X-Real-IP         \$remote_addr;
     }
+
+    # AirSane web UI + eSCL endpoints (proxied for portal access; native
+    # Bonjour discovery on port $AIRSANE_PORT remains the primary path).
+    location /escl/ {
+        proxy_pass         http://127.0.0.1:$AIRSANE_PORT/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              \$host;
+        proxy_set_header   X-Real-IP         \$remote_addr;
+        proxy_read_timeout 300s;
+    }
 }
 NGINX
 ln -sf /etc/nginx/sites-available/printershare /etc/nginx/sites-enabled/printershare
@@ -266,10 +319,12 @@ fi
 # ── Enable + (re)start the new units ────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now scanservjs.service
+systemctl enable --now airsane.service
 systemctl enable --now printershare-portal.service
 # On re-runs (git pull → rebuild), the units exist and are running but with
 # stale code; force a restart so the new build/config takes effect.
 systemctl restart scanservjs.service
+systemctl restart airsane.service
 systemctl restart printershare-portal.service
 
 # ── Summary ─────────────────────────────────────────────────────────────────
@@ -282,6 +337,7 @@ cat <<EOF
   Portal      : http://$ip/
   CUPS admin  : http://$ip:631/   (loopback by default)
   Scanservjs  : http://$ip/scan/
+  AirSane     : http://$ip/escl/  (eSCL/AirScan on Bonjour _uscan._tcp)
   Samba share : \\\\$ip\\Scans     (user: $SAMBA_USER)
 
   Detected scanners:

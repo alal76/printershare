@@ -35,6 +35,14 @@ const CUPS_CONTAINER = process.env.CUPS_CONTAINER || 'ps-cups';
 /** Sequential lock chain — every withScanLock() awaits the previous one. */
 let chain = Promise.resolve();
 
+/** Telemetry counters surfaced via getJobStatus() for the dashboard. */
+let activeCount = 0;
+let queuedCount = 0;
+let totalCompleted = 0;
+let lastDurationMs = 0;
+let lastStartedAt = null;
+let lastFinishedAt = null;
+
 /**
  * Run a CUPS CLI command (locally or inside the cups container).
  * `args` is the full argv as the user would type it: `['cupsdisable', '-h', q]`.
@@ -86,7 +94,12 @@ function sleep(ms) {
  * @returns {Promise<T>}
  */
 function withScanLock(fn) {
+  queuedCount += 1;
   const next = chain.then(async () => {
+    queuedCount = Math.max(0, queuedCount - 1);
+    activeCount += 1;
+    const startedAt = Date.now();
+    lastStartedAt = new Date(startedAt).toISOString();
     const queues = listQueues();
     const disabled = [];
     try {
@@ -112,6 +125,10 @@ function withScanLock(fn) {
       for (const q of disabled) {
         tryRunCups(['cupsenable', q], 5_000);
       }
+      activeCount = Math.max(0, activeCount - 1);
+      totalCompleted += 1;
+      lastDurationMs = Date.now() - startedAt;
+      lastFinishedAt = new Date().toISOString();
     }
   });
 
@@ -120,4 +137,19 @@ function withScanLock(fn) {
   return next;
 }
 
-module.exports = { withScanLock, listQueues };
+/**
+ * Snapshot of the scan-lock state for dashboards / health endpoints.
+ * @returns {{active:number, queued:number, completed:number, lastDurationMs:number, lastStartedAt:string|null, lastFinishedAt:string|null}}
+ */
+function getJobStatus() {
+  return {
+    active:         activeCount,
+    queued:         queuedCount,
+    completed:      totalCompleted,
+    lastDurationMs,
+    lastStartedAt,
+    lastFinishedAt,
+  };
+}
+
+module.exports = { withScanLock, listQueues, getJobStatus };
