@@ -70,7 +70,37 @@ export const useDevicesStore = defineStore('devices', () => {
     printers.value = printers.value.filter(p => p.name !== name)
   }
 
-  return { usb, printers, loading, error, fetchDevices, addPrinter, removePrinter, testPrint: testPrintDevice }
+  async function autoAddPrinter(vidpid: string, name?: string): Promise<{ name: string; uri: string }> {
+    const r = await fetch('/api/v1/devices/printer/auto-add', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ vidpid, name }),
+    })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Auto-add failed')
+    }
+    const data = await r.json() as { name: string; uri: string }
+    await fetchDevices()
+    return data
+  }
+
+  async function resetAll(): Promise<{ removed: string[]; errors: string[] }> {
+    const r = await fetch('/api/v1/devices/reset', { method: 'POST' })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Reset failed')
+    }
+    const data = await r.json() as { removed: string[]; errors: string[] }
+    await fetchDevices()
+    return data
+  }
+
+  return {
+    usb, printers, loading, error,
+    fetchDevices, addPrinter, autoAddPrinter, removePrinter,
+    resetAll, testPrint: testPrintDevice,
+  }
 })
 
 /**

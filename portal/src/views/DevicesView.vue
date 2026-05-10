@@ -1,21 +1,32 @@
 <template>
   <AppShell title="Devices">
     <div class="max-w-3xl space-y-6">
-      <!-- Refresh button -->
-      <div class="flex items-center justify-between">
+      <!-- Refresh / Reset buttons -->
+      <div class="flex items-center justify-between gap-2 flex-wrap">
         <p class="text-sm text-gray-500">
           Manage connected printers and scanners. USB devices are detected
           automatically; network printers can be added via IPP.
         </p>
-        <Button
-          variant="secondary"
-          size="sm"
-          :loading="devices.loading"
-          @click="devices.fetchDevices()"
-        >
-          <RefreshCwIcon class="w-3.5 h-3.5" />
-          Refresh
-        </Button>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            :loading="resetting"
+            @click="onReset"
+          >
+            <RotateCcwIcon class="w-3.5 h-3.5" />
+            Reset Detection
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            :loading="devices.loading"
+            @click="devices.fetchDevices()"
+          >
+            <RefreshCwIcon class="w-3.5 h-3.5" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <!-- ── CUPS Printers ──────────────────────────────────────────────── -->
@@ -170,7 +181,7 @@
               </div>
 
               <!-- Capability badges -->
-              <div class="flex flex-wrap gap-1 justify-end">
+              <div class="flex flex-wrap gap-1 justify-end items-center">
                 <span
                   v-if="d.capabilities.print"
                   class="badge-blue"
@@ -191,6 +202,17 @@
                   class="badge-gray"
                   :data-testid="`usb-cap-fax-${d.vidpid.replace(':', '-')}`"
                 >Fax</span>
+                <Button
+                  v-if="d.capabilities.print && !isInCups(d) && d.make"
+                  variant="primary"
+                  size="sm"
+                  class="ml-2"
+                  :loading="autoAdding === d.vidpid"
+                  @click="onAutoAdd(d)"
+                >
+                  <PlusIcon class="w-3.5 h-3.5" />
+                  Add to CUPS
+                </Button>
               </div>
             </div>
           </Card>
@@ -311,7 +333,7 @@ import { ref, onMounted } from 'vue'
 import {
   PrinterIcon, ScanIcon, UsbIcon, RefreshCwIcon, PlusIcon,
   Trash2Icon, FileCheckIcon, WifiIcon, CopyIcon,
-  SmartphoneIcon, MonitorIcon, AppleIcon,
+  SmartphoneIcon, MonitorIcon, AppleIcon, RotateCcwIcon,
 } from 'lucide-vue-next'
 import AppShell   from '@/components/layout/AppShell.vue'
 import Card       from '@/components/ui/Card.vue'
@@ -319,6 +341,7 @@ import Button     from '@/components/ui/Button.vue'
 import Modal      from '@/components/ui/Modal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useDevicesStore, testPrintDevice } from '@/stores/devices'
+import type { UsbDevice } from '@/stores/devices'
 import { useToastStore }  from '@/stores/toast'
 
 type SvcStatus = 'ok' | 'warning' | 'error' | 'pending' | 'offline' | 'unknown'
@@ -331,8 +354,52 @@ const newPrinterName  = ref('')
 const newPrinterUri   = ref('')
 const addingPrinter   = ref(false)
 const testingPrinter  = ref<string | null>(null)
+const autoAdding      = ref<string | null>(null)
+const resetting       = ref(false)
 
 onMounted(() => devices.fetchDevices())
+
+function isInCups(d: UsbDevice): boolean {
+  return devices.printers.some(p => p.uri.includes(`/${d.make}/`) ||
+    (d.model && p.uri.includes(encodeURIComponent(d.model))))
+}
+
+async function onAutoAdd(d: UsbDevice) {
+  autoAdding.value = d.vidpid
+  try {
+    const result = await devices.autoAddPrinter(d.vidpid)
+    toast.success('Printer added', `${result.name} is now available.`)
+  } catch (err) {
+    toast.error('Auto-add failed', err instanceof Error ? err.message : String(err))
+  } finally {
+    autoAdding.value = null
+  }
+}
+
+async function onReset() {
+  if (!globalThis.confirm(
+    'Reset detection?\n\n' +
+    'This will remove ALL configured CUPS printers and clear the setup ' +
+    'wizard, so you can re-run discovery from scratch.\n\n' +
+    'USB devices and scanned files are NOT deleted.'
+  )) return
+  resetting.value = true
+  try {
+    const r = await devices.resetAll()
+    if (r.removed.length > 0) {
+      toast.success('Detection reset', `Removed ${r.removed.length} printer(s): ${r.removed.join(', ')}`)
+    } else {
+      toast.success('Detection reset', 'No printers were configured.')
+    }
+    if (r.errors.length > 0) {
+      toast.error('Some items could not be reset', r.errors.join('; '))
+    }
+  } catch (err) {
+    toast.error('Reset failed', err instanceof Error ? err.message : String(err))
+  } finally {
+    resetting.value = false
+  }
+}
 
 function printerStatus(state: string): SvcStatus {
   if (state === 'idle')     return 'ok'
