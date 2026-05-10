@@ -1,0 +1,294 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  printershare — in-LXC installer  (Debian 12)
+# ----------------------------------------------------------------------------
+#  Runs INSIDE a fresh Debian 12 container created by `printershare.sh` on the
+#  Proxmox host.  Installs every printershare component as a native service:
+#
+#    * CUPS                 systemd  cups.service           :631
+#    * Avahi                systemd  avahi-daemon.service   mDNS
+#    * SANE + scanservjs    systemd  scanservjs.service     :8080
+#    * Portal (Node)        systemd  printershare-portal    :3000
+#    * Nginx (front door)   systemd  nginx.service          :80
+#    * Samba                systemd  smbd / nmbd            :445
+#    * NFS (optional)       systemd  nfs-kernel-server      :2049
+#
+#  Idempotent — safe to re-run after a `git pull`.
+# ============================================================================
+set -euo pipefail
+
+[[ $EUID -ne 0 ]] && { echo "Run as root"; exit 1; }
+
+# ── Tunables ────────────────────────────────────────────────────────────────
+REPO_URL="${REPO_URL:-https://github.com/alal76/printershare.git}"
+REPO_BRANCH="${REPO_BRANCH:-main}"
+REPO_DIR="${REPO_DIR:-/opt/printershare}"
+SCANS_DIR="${SCANS_DIR:-/srv/printershare/scans}"
+SCANSERVJS_DIR="/opt/scanservjs"
+NODE_MAJOR="${NODE_MAJOR:-20}"
+RCLONE_VERSION="${RCLONE_VERSION:-v1.67.0}"
+SAMBA_USER="${SAMBA_USER:-scanner}"
+SAMBA_PASS="${SAMBA_PASS:-scanner123}"
+PORTAL_PORT="${PORTAL_PORT:-3000}"
+SCANSERVJS_PORT="${SCANSERVJS_PORT:-8080}"
+
+info()  { echo -e "\e[1;32m==>\e[0m $*"; }
+warn()  { echo -e "\e[1;33mWARN:\e[0m $*"; }
+die()   { echo -e "\e[1;31mERROR:\e[0m $*" >&2; exit 1; }
+
+export DEBIAN_FRONTEND=noninteractive
+
+# ── Repo ────────────────────────────────────────────────────────────────────
+info "Cloning / refreshing $REPO_URL ($REPO_BRANCH)"
+if [[ ! -d "$REPO_DIR/.git" ]]; then
+    apt-get update -qq
+    apt-get install -y --no-install-recommends git ca-certificates curl >/dev/null
+    git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$REPO_DIR"
+else
+    git -C "$REPO_DIR" fetch --depth 1 origin "$REPO_BRANCH"
+    git -C "$REPO_DIR" reset --hard "origin/$REPO_BRANCH"
+fi
+
+# ── Base packages ───────────────────────────────────────────────────────────
+info "Installing system packages"
+apt-get update -qq
+apt-get install -y --no-install-recommends \
+    cups cups-bsd cups-filters cups-pdf cups-client \
+    foomatic-db foomatic-db-engine foomatic-db-compressed-ppds \
+    printer-driver-gutenprint printer-driver-cups-pdf hplip \
+    avahi-daemon avahi-utils libnss-mdns dbus \
+    sane-utils sane-airscan libsane1 \
+    imagemagick ghostscript poppler-utils tesseract-ocr \
+    samba samba-common-bin \
+    nfs-kernel-server \
+    nginx \
+    usbutils \
+    unzip jq build-essential >/dev/null
+
+# Blacklist usblp — it competes with CUPS/SANE for the USB interface.
+echo "blacklist usblp" >/etc/modprobe.d/blacklist-usblp.conf
+modprobe -r usblp 2>/dev/null || true
+
+# ── Node.js ─────────────────────────────────────────────────────────────────
+if ! command -v node >/dev/null || \
+   [[ "$(node -e 'process.stdout.write(process.version.split(".")[0].slice(1))')" -lt 18 ]]; then
+    info "Installing Node.js $NODE_MAJOR"
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - >/dev/null
+    apt-get install -y nodejs >/dev/null
+fi
+info "node: $(node --version)   npm: $(npm --version)"
+
+# ── rclone (for cloud upload of scans, optional) ────────────────────────────
+if ! command -v rclone >/dev/null; then
+    info "Installing rclone $RCLONE_VERSION"
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64)  ra=amd64 ;;
+        aarch64) ra=arm64 ;;
+        armv7l)  ra=arm-v7 ;;
+        *) die "unsupported arch $arch" ;;
+    esac
+    curl -fsSL "https://github.com/rclone/rclone/releases/download/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${ra}.zip" -o /tmp/rclone.zip
+    unzip -qo /tmp/rclone.zip -d /tmp/rclone_x
+    install -m 755 "/tmp/rclone_x/rclone-${RCLONE_VERSION}-linux-${ra}/rclone" /usr/local/bin/rclone
+    rm -rf /tmp/rclone.zip /tmp/rclone_x
+fi
+
+# ── Scans dir ───────────────────────────────────────────────────────────────
+mkdir -p "$SCANS_DIR" && chmod 0777 "$SCANS_DIR"
+
+# ── CUPS configuration ──────────────────────────────────────────────────────
+info "Configuring CUPS"
+cp -f "$REPO_DIR/cups/cupsd.conf" /etc/cups/cupsd.conf
+# CUPS web UI requires the lp / lpadmin groups to exist.
+groupadd -f lpadmin
+usermod -aG lpadmin root
+systemctl enable --now cups
+systemctl restart cups
+
+# ── Avahi (mDNS/Bonjour for printer + share discovery) ──────────────────────
+systemctl enable --now avahi-daemon
+
+# ── SANE: append Samsung SCX-3400 USB ID if missing ─────────────────────────
+if ! grep -q '0x344f' /etc/sane.d/xerox_mfp.conf 2>/dev/null; then
+    info "Adding Samsung SCX-3400 (04e8:344f) to xerox_mfp backend"
+    {
+        echo
+        echo '# printershare: Samsung SCX-3400 Series'
+        echo 'usb 0x04e8 0x344f'
+    } >>/etc/sane.d/xerox_mfp.conf
+fi
+# saned (network scanner) — bind on all interfaces; nginx fronts it.
+grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
+    echo '0.0.0.0/0' >>/etc/sane.d/saned.conf
+
+# ── Scanservjs ──────────────────────────────────────────────────────────────
+info "Installing scanservjs"
+if [[ ! -d "$SCANSERVJS_DIR/.git" ]]; then
+    git clone --depth 1 --branch release https://github.com/sbs20/scanservjs.git "$SCANSERVJS_DIR"
+else
+    git -C "$SCANSERVJS_DIR" pull --ff-only || true
+fi
+( cd "$SCANSERVJS_DIR" && npm install --omit=dev --silent )
+mkdir -p "$SCANSERVJS_DIR/config"
+cp -f "$REPO_DIR/scanservjs/config.js" "$SCANSERVJS_DIR/config/config.js"
+install -m 755 "$REPO_DIR/scanservjs/scripts/scan-save-upload.sh" /usr/local/bin/scan-save-upload.sh
+
+cat >/etc/systemd/system/scanservjs.service <<UNIT
+[Unit]
+Description=Scanservjs Web Scanner UI
+After=network.target avahi-daemon.service
+Wants=avahi-daemon.service
+
+[Service]
+Type=simple
+WorkingDirectory=$SCANSERVJS_DIR
+ExecStart=$(command -v node) server/server.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=$SCANSERVJS_PORT
+# scanservjs writes scans here (see scanservjs/config.js)
+Environment=OUTPUT_DIR=$SCANS_DIR
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# ── Portal (Express + built Vue assets) ─────────────────────────────────────
+info "Building portal"
+cd "$REPO_DIR/portal"
+npm ci --silent
+npm run build --silent
+
+cat >/etc/systemd/system/printershare-portal.service <<UNIT
+[Unit]
+Description=PrinterShare Portal (Express + Vue)
+After=network.target cups.service scanservjs.service
+
+[Service]
+Type=simple
+WorkingDirectory=$REPO_DIR/portal
+ExecStart=$(command -v node) server/index.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PORT=$PORTAL_PORT
+Environment=CUPS_LOCAL=1
+Environment=CUPS_HOST=127.0.0.1
+Environment=CUPS_PORT=631
+Environment=SCANSERVJS_URL=http://127.0.0.1:$SCANSERVJS_PORT
+Environment=SCANS_PATH=$SCANS_DIR
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# ── Nginx site (native, replaces the docker nginx config) ───────────────────
+info "Configuring nginx"
+SERVER_NAME="$(hostname -f 2>/dev/null || hostname)"
+cat >/etc/nginx/sites-available/printershare <<NGINX
+# printershare — native LXC deployment
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    client_max_body_size 64M;
+
+    # Built Vue SPA + Express API (portal serves both)
+    location / {
+        proxy_pass         http://127.0.0.1:$PORTAL_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              \$host;
+        proxy_set_header   X-Real-IP         \$remote_addr;
+        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto \$scheme;
+    }
+
+    # Scanservjs UI + WebSocket (kept reachable for power users)
+    location /scan/ {
+        rewrite            ^/scan/(.*)\$ /\$1 break;
+        proxy_pass         http://127.0.0.1:$SCANSERVJS_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade           \$http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+        proxy_set_header   Host              \$host;
+        proxy_read_timeout 300s;
+    }
+
+    # CUPS web admin (loopback only by default — see cupsd.conf)
+    location /cups/ {
+        proxy_pass         http://127.0.0.1:631/;
+        proxy_set_header   Host              \$host;
+        proxy_set_header   X-Real-IP         \$remote_addr;
+    }
+}
+NGINX
+ln -sf /etc/nginx/sites-available/printershare /etc/nginx/sites-enabled/printershare
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl enable --now nginx
+systemctl reload nginx
+
+# ── Samba ───────────────────────────────────────────────────────────────────
+info "Configuring Samba (\\\\$SERVER_NAME\\Scans)"
+id "$SAMBA_USER" &>/dev/null || useradd -r -s /usr/sbin/nologin "$SAMBA_USER"
+printf '%s\n%s\n' "$SAMBA_PASS" "$SAMBA_PASS" | smbpasswd -a -s "$SAMBA_USER" >/dev/null
+if ! grep -q '^\[Scans\]' /etc/samba/smb.conf; then
+    cat >>/etc/samba/smb.conf <<SMB
+
+[Scans]
+   comment        = PrinterShare scans
+   path           = $SCANS_DIR
+   valid users    = $SAMBA_USER
+   read only      = no
+   browsable      = yes
+   create mask    = 0666
+   directory mask = 0777
+SMB
+fi
+systemctl enable --now smbd nmbd
+systemctl restart smbd nmbd
+
+# ── NFS (best-effort — fails silently in unprivileged LXCs) ─────────────────
+if grep -q 'kernel_nfsd' /proc/filesystems 2>/dev/null || modprobe nfsd 2>/dev/null; then
+    grep -q "$SCANS_DIR" /etc/exports 2>/dev/null || \
+        echo "$SCANS_DIR *(rw,sync,no_subtree_check,no_root_squash,insecure)" >>/etc/exports
+    exportfs -rav || true
+    systemctl enable --now nfs-kernel-server || warn "nfs-kernel-server failed (likely unprivileged LXC)"
+else
+    warn "NFS kernel module unavailable — skipping NFS export"
+fi
+
+# ── Enable + start the new units ────────────────────────────────────────────
+systemctl daemon-reload
+systemctl enable --now scanservjs.service
+systemctl enable --now printershare-portal.service
+
+# ── Summary ─────────────────────────────────────────────────────────────────
+ip="$(hostname -I | awk '{print $1}')"
+cat <<EOF
+
+══════════════════════════════════════════════════════════════
+  printershare — install complete
+══════════════════════════════════════════════════════════════
+  Portal      : http://$ip/
+  CUPS admin  : http://$ip:631/   (loopback by default)
+  Scanservjs  : http://$ip/scan/
+  Samba share : \\\\$ip\\Scans     (user: $SAMBA_USER)
+
+  Detected scanners:
+$(scanimage -L 2>/dev/null | sed 's/^/    /' || echo '    (none yet — plug in printer/scanner)')
+
+  Detected printers:
+$(lpstat -p 2>/dev/null | sed 's/^/    /' || echo '    (none yet — add via http://$ip:631/)')
+
+  Logs:
+    journalctl -u printershare-portal -f
+    journalctl -u scanservjs -f
+    journalctl -u cups -f
+══════════════════════════════════════════════════════════════
+EOF
