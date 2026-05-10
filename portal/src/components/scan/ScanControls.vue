@@ -128,14 +128,9 @@ const opts = ref({ resolution: '300', color: 'color', format: 'pdf', source: 'fl
 async function startScan() {
   scanning.value = true
   try {
-    // 0. Best-effort recovery: CUPS sometimes holds the USB interface,
-    //    blocking SANE.  This cycles the print queues so SANE can claim it.
-    //    Failure here is non-fatal — we still attempt the scan.
-    try {
-      await fetch('/api/v1/devices/recover', { method: 'POST' })
-    } catch { /* ignore */ }
-
     // 1. Fetch context to discover the active SANE device id and pipelines.
+    //    The /scan/api/v1/context endpoint is read-only and doesn't claim the
+    //    device, so it doesn't need the device-lock.
     const ctxRes = await fetch('/scan/api/v1/context')
     if (!ctxRes.ok) throw new Error(`No scanner available (HTTP ${ctxRes.status})`)
     const ctx = await ctxRes.json()
@@ -170,8 +165,9 @@ async function startScan() {
     const pipeline = pickPipeline()
     if (!pipeline) throw new Error('Scanner has no available pipelines')
 
-    // 4. POST the scan request.
-    const r = await fetch('/scan/api/v1/scan', {
+    // 4. POST the scan request through the portal so CUPS releases the
+    //    USB device while SANE scans, then reclaims it afterwards.
+    const r = await fetch('/api/v1/scans/run', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
