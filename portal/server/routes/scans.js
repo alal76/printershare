@@ -3,6 +3,7 @@
 const router = require('express').Router();
 const fs     = require('node:fs');
 const path   = require('node:path');
+const { spawn }  = require('node:child_process');
 const mime   = require('mime-types');
 const { withScanLock } = require('../lib/device-lock');
 const { isNative } = require('../lib/deployment');
@@ -16,6 +17,52 @@ const MAX_PREVIEW = 100; // max files to list
 function safeName(name) {
   return path.basename(name).replaceAll(/[^a-zA-Z0-9._-]/g, '_');
 }
+
+// GET /api/v1/scans/context — return scanner device capabilities from scanservjs
+router.get('/context', async (_req, res) => {
+  try {
+    const r = await fetch(`${SCANSERVJS_URL}/api/v1/context`);
+    if (!r.ok) return res.status(502).json({ error: 'Scanner unavailable', device: null });
+    const ctx = await r.json();
+    const device = ctx.devices?.[0] ?? null;
+    res.json({
+      device: device ? {
+        id:       device.id,
+        name:     device.name,
+        features: device.features ?? {},
+        settings: device.settings ?? {},
+      } : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message), device: null });
+  }
+});
+
+// POST /api/v1/scans/combine — merge multiple single-page PDFs into one using pdfunite
+router.post('/combine', (req, res) => {
+  const { files, outputName, deleteAfter } = req.body ?? {};
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: 'No files specified' });
+  }
+  const safePaths = files.map(f => path.join(SCANS_PATH, safeName(f)));
+  for (const p of safePaths) {
+    if (!fs.existsSync(p)) return res.status(404).json({ error: `Not found: ${path.basename(p)}` });
+  }
+  const rawName = String(outputName || `scan-multipage-${Date.now()}`);
+  const outName = safeName(rawName).replace(/\.[^.]*$/, '') + '.pdf';
+  const outPath = path.join(SCANS_PATH, outName);
+
+  const child = spawn('pdfunite', [...safePaths, outPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', d => { stderr += String(d); });
+  child.on('close', code => {
+    if (code !== 0) return res.status(500).json({ error: `Combine failed: ${stderr.slice(0, 300)}` });
+    if (deleteAfter === true) {
+      for (const p of safePaths) { try { fs.unlinkSync(p); } catch { /* best effort */ } }
+    }
+    res.json({ ok: true, name: outName });
+  });
+});
 
 // GET /api/v1/scans — list files
 router.get('/', (_req, res) => {

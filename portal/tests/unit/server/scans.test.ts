@@ -102,3 +102,29 @@ describe('DELETE /:filename', () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe('GET /context', () => {
+  it('returns 502 when scanservjs is unreachable', async () => {
+    // SCANSERVJS_URL is not set to a real server in tests
+    const res = await request(makeApp()).get('/context');
+    expect([500, 502]).toContain(res.status);
+    expect(res.body).toHaveProperty('device');
+  });
+});
+
+describe('POST /combine', () => {
+  it('returns 400 when no files are provided', async () => {
+    const res = await request(makeApp()).post('/combine').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when files array is empty', async () => {
+    const res = await request(makeApp()).post('/combine').send({ files: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 404 when a referenced file does not exist', async () => {
+    const res = await request(makeApp()).post('/combine').send({ files: ['missing-page.pdf'] });
+    expect(res.status).toBe(404);
+  });
+});
