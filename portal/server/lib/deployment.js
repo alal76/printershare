@@ -144,8 +144,13 @@ function serviceRunning(name) {
  *
  * Docker mode → always true (we assume the compose file defines it; the
  *   caller distinguishes "in profile" via COMPOSE_PROFILES).
- * Native mode → `systemctl cat <unit>` exits 0 only if the unit file is
- *   actually installed on this host.
+ * Native mode → `systemctl is-enabled <unit>` returns one of the
+ *   "actively enabled" states. We deliberately reject `static`, `masked`,
+ *   `disabled`, `indirect`, and `generated` — Debian ships several units
+ *   (e.g. `ipp-usb.service`) as `static`, meaning the unit file exists but
+ *   is only intended to be triggered on demand. Treating those as
+ *   "configured" gives a misleading "offline" rather than the correct
+ *   "disabled" / not-part-of-this-install signal.
  *
  * Used by /api/v1/health to surface `disabled` (not part of this install)
  * vs `offline` (installed but not running).
@@ -153,13 +158,14 @@ function serviceRunning(name) {
  * @param {string} name
  * @returns {boolean}
  */
+const ENABLED_STATES = new Set(['enabled', 'enabled-runtime', 'alias', 'linked', 'linked-runtime']);
 function serviceConfigured(name) {
   const entry = SERVICE_MAP[name];
   if (!entry) return false;
   if (!isNative()) return Boolean(entry.container);
   if (!entry.unit) return false;
-  const r = spawnSync('systemctl', ['cat', entry.unit], { encoding: 'utf8', timeout: 3_000 });
-  return r.status === 0;
+  const r = spawnSync('systemctl', ['is-enabled', entry.unit], { encoding: 'utf8', timeout: 3_000 });
+  return ENABLED_STATES.has((r.stdout || '').trim());
 }
 
 /**
