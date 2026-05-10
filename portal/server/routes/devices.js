@@ -423,4 +423,149 @@ router.post('/reset', (_req, res) => {
   res.json({ ok: errors.length === 0, removed, errors });
 });
 
+/**
+ * Run a docker exec on the scanservjs container.
+ */
+function runScan(args, timeout = 10_000) {
+  return run(['docker', 'exec', 'ps-scanservjs', ...args], timeout);
+}
+
+/**
+ * Detect whether SANE can currently see a scanner.
+ * @returns {boolean}
+ */
+function saneSeesScanner() {
+  try {
+    const out = runScan(['scanimage', '-L'], 8_000);
+    return /^device\s+'/m.test(out);
+  } catch { return false; }
+}
+
+/**
+ * Detect whether a USB device with scan capability is currently attached.
+ * Uses the existing parseUsbDevices() pipeline (sysfs + SANE + CUPS cross-ref).
+ * @returns {boolean}
+ */
+function hasScanCapableUsbDevice() {
+  try {
+    const list = parseUsbDevices();
+    return Array.isArray(list) && list.some(d => d?.capabilities?.scan);
+  } catch { return false; }
+}
+
+/**
+ * List every CUPS print queue name.
+ * @returns {string[]}
+ */
+function listCupsQueues() {
+  try {
+    const out = runCups(['lpstat', '-p'], 5_000);
+    const names = [];
+    const re = /^printer (\S+)\s/gm;
+    let m;
+    while ((m = re.exec(out)) !== null) names.push(m[1]);
+    return names;
+  } catch { return []; }
+}
+
+/**
+ * Re-enable any CUPS queues that have flipped to disabled.
+ * @param {string[]} queues
+ * @param {{enabled:string[], errors:string[]}} result
+ */
+function recoverDisabledQueues(queues, result) {
+  for (const q of queues) {
+    try {
+      const detail = runCups(['lpstat', '-p', q], 5_000);
+      if (/disabled/i.test(detail)) {
+        runCups(['cupsenable', q], 5_000);
+        result.enabled.push(q);
+      }
+    } catch (e) {
+      result.errors.push(`enable ${q}: ${String(e.message).slice(0, 100)}`);
+    }
+  }
+}
+
+/**
+ * Cycle (disable→enable) every CUPS queue so CUPS releases its grip on the
+ * USB interface, allowing the SANE backend to claim it.
+ * @param {string[]} queues
+ * @param {{cycled:string[], errors:string[]}} result
+ */
+function cycleCupsQueues(queues, result) {
+  for (const q of queues) {
+    try {
+      runCups(['cupsdisable', q], 5_000);
+      result.cycled.push(q);
+    } catch (e) {
+      result.errors.push(`cupsdisable ${q}: ${String(e.message).slice(0, 100)}`);
+    }
+  }
+  // Brief pause so the kernel releases the USB interface.
+  const until = Date.now() + 1500;
+  while (Date.now() < until) { /* spin */ }
+  for (const q of result.cycled) {
+    try {
+      runCups(['cupsenable', q], 5_000);
+    } catch (e) {
+      result.errors.push(`cupsenable ${q}: ${String(e.message).slice(0, 100)}`);
+    }
+  }
+}
+
+/**
+ * Run device-recovery once.  Returns an object describing what was done so it
+ * can be surfaced in logs and the API response.
+ *
+ * Recovery actions:
+ *   1. If a print queue is `disabled`, run cupsenable (queues sometimes flip
+ *      to disabled after a USB transient or CUPS restart).
+ *   2. If SANE cannot see a scanner but a USB scanner is attached, cycle every
+ *      CUPS queue (cupsdisable → cupsenable).  CUPS holds the USB interface
+ *      open while a queue is enabled, which blocks the SANE backend; cycling
+ *      releases the lock long enough for SANE to claim it.
+ *
+ * Safe to call repeatedly; no-ops when nothing is wrong.
+ *
+ * @returns {{ enabled:string[], cycled:string[], scannerOk:boolean, usbScannerPresent:boolean, errors:string[] }}
+ */
+function runRecovery() {
+  const result = {
+    enabled: [],
+    cycled: [],
+    scannerOk: false,
+    usbScannerPresent: false,
+    errors: [],
+  };
+
+  const queues = listCupsQueues();
+  recoverDisabledQueues(queues, result);
+
+  result.usbScannerPresent = hasScanCapableUsbDevice();
+  result.scannerOk         = saneSeesScanner();
+
+  if (result.usbScannerPresent && !result.scannerOk && queues.length > 0) {
+    cycleCupsQueues(queues, result);
+    result.scannerOk = saneSeesScanner();
+  }
+
+  return result;
+}
+
+/**
+ * POST /api/v1/devices/recover
+ * Manually trigger the recovery routine.  Same logic that the periodic
+ * watcher runs in the background.
+ */
+router.post('/recover', (_req, res) => {
+  try {
+    const summary = runRecovery();
+    res.json({ ok: summary.errors.length === 0, ...summary });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
 module.exports = router;
+module.exports.runRecovery = runRecovery;

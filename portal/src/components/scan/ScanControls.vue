@@ -128,6 +128,13 @@ const opts = ref({ resolution: '300', color: 'color', format: 'pdf', source: 'fl
 async function startScan() {
   scanning.value = true
   try {
+    // 0. Best-effort recovery: CUPS sometimes holds the USB interface,
+    //    blocking SANE.  This cycles the print queues so SANE can claim it.
+    //    Failure here is non-fatal — we still attempt the scan.
+    try {
+      await fetch('/api/v1/devices/recover', { method: 'POST' })
+    } catch { /* ignore */ }
+
     // 1. Fetch context to discover the active SANE device id and pipelines.
     const ctxRes = await fetch('/scan/api/v1/context')
     if (!ctxRes.ok) throw new Error(`No scanner available (HTTP ${ctxRes.status})`)
@@ -182,7 +189,8 @@ async function startScan() {
     })
     if (!r.ok) {
       const text = await r.text().catch(() => '')
-      throw new Error(`Scan failed: HTTP ${r.status}${text ? ` — ${text.slice(0, 200)}` : ''}`)
+      const detail = text ? ` — ${text.slice(0, 200)}` : ''
+      throw new Error(`Scan failed: HTTP ${r.status}${detail}`)
     }
     toast.success('Scan complete', 'File saved to scan folder.')
     await scanStore.fetchFiles()
