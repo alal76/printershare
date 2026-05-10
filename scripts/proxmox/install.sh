@@ -133,6 +133,13 @@ systemctl restart cups
 systemctl enable --now avahi-daemon
 
 # ── SANE: append Samsung SCX-3400 USB ID if missing ─────────────────────────
+# Enable the xerox_mfp backend in dll.conf (Debian ships it commented out
+# on some installs). Without this, scanimage -L returns "no scanners".
+if grep -qE '^#\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
+    sed -ri 's/^#\s*(xerox_mfp)\b/\1/' /etc/sane.d/dll.conf
+elif ! grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
+    echo 'xerox_mfp' >>/etc/sane.d/dll.conf
+fi
 if ! grep -q '0x344f' /etc/sane.d/xerox_mfp.conf 2>/dev/null; then
     info "Adding Samsung SCX-3400 (04e8:344f) to xerox_mfp backend"
     {
