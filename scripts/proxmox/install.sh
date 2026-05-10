@@ -52,12 +52,10 @@ else
 fi
 
 # ── Base packages ───────────────────────────────────────────────────────────
-info "Installing system packages"
+info "Installing core packages (cups, avahi, sane, nginx, samba)"
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     cups cups-bsd cups-filters cups-pdf cups-client \
-    foomatic-db foomatic-db-engine foomatic-db-compressed-ppds \
-    printer-driver-gutenprint printer-driver-cups-pdf hplip \
     avahi-daemon avahi-utils libnss-mdns dbus \
     sane-utils sane-airscan libsane1 \
     imagemagick ghostscript poppler-utils tesseract-ocr \
@@ -65,8 +63,20 @@ apt-get install -y --no-install-recommends \
     nfs-kernel-server \
     nginx \
     usbutils \
-    unzip jq build-essential \
-    cmake g++ pkg-config libsane-dev libavahi-client-dev libjpeg-dev libpng-dev zlib1g-dev libusb-1.0-0-dev >/dev/null
+    unzip jq
+
+info "Installing printer drivers (foomatic, gutenprint, hplip)"
+# NB: foomatic-db and foomatic-db-compressed-ppds CONFLICT on Debian 12
+# (they ship overlapping PPD files), so we install only foomatic-db.
+apt-get install -y --no-install-recommends \
+    foomatic-db foomatic-db-engine \
+    printer-driver-gutenprint printer-driver-cups-pdf hplip \
+    || warn "Some printer drivers failed to install — CUPS may still work for IPP-capable devices"
+
+info "Installing AirSane build toolchain"
+apt-get install -y --no-install-recommends \
+    build-essential cmake g++ pkg-config \
+    libsane-dev libavahi-client-dev libjpeg-dev libpng-dev zlib1g-dev libusb-1.0-0-dev
 
 # Blacklist usblp — it competes with CUPS/SANE for the USB interface.
 echo "blacklist usblp" >/etc/modprobe.d/blacklist-usblp.conf
