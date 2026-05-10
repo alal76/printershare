@@ -161,13 +161,12 @@ verify_lxc_config() {
     # remaining config errors with a clear message of its own.
 }
 
-# Run the in-CT installer (always fetched fresh).
+# Run the in-CT installer.  We bootstrap git inside the CT and `git clone`
+# the repo to /opt/printershare, then run install.sh from the working tree.
+# This avoids relying on raw.githubusercontent.com (whose CDN can serve
+# stale install.sh for several minutes after a push).
 run_in_ct_installer() {
     local ctid="$1" repo_url="$2" repo_branch="$3"
-    local install_url
-    # Build raw URL from repo URL (handles forks too).
-    install_url="https://raw.githubusercontent.com/${repo_url#https://github.com/}"
-    install_url="${install_url%.git}/${repo_branch}/scripts/proxmox/install.sh"
 
     msg_info "Bootstrapping CT $ctid (apt update, install curl/git)"
     pct exec "$ctid" -- bash -c '
@@ -177,15 +176,24 @@ run_in_ct_installer() {
         apt-get install -y --no-install-recommends curl ca-certificates git >/dev/null
     '
 
-    msg_info "Running in-LXC installer from $install_url"
-    # Append a timestamp query string so the raw.githubusercontent.com CDN
-    # never serves a stale cached copy when iterating on install.sh.
-    local nocache_url="${install_url}?nocache=$(date +%s)"
+    msg_info "Cloning $repo_url ($repo_branch) into CT $ctid:/opt/printershare"
+    pct exec "$ctid" -- bash -c "
+        set -e
+        if [[ ! -d /opt/printershare/.git ]]; then
+            rm -rf /opt/printershare
+            git clone --depth 1 --branch '$repo_branch' '$repo_url' /opt/printershare
+        else
+            git -C /opt/printershare fetch --depth 1 origin '$repo_branch'
+            git -C /opt/printershare reset --hard 'origin/$repo_branch'
+        fi
+    " || die "git clone failed inside CT $ctid"
+
+    msg_info "Running /opt/printershare/scripts/proxmox/install.sh inside CT $ctid"
     pct exec "$ctid" -- bash -c "
         set -e
         export REPO_URL='$repo_url'
         export REPO_BRANCH='$repo_branch'
-        curl -fsSL '$nocache_url' | bash
+        bash /opt/printershare/scripts/proxmox/install.sh
     " || die "in-LXC install failed — see CT $ctid console (pct enter $ctid)"
 }
 
