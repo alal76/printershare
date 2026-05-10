@@ -58,6 +58,15 @@
         </div>
       </div>
 
+      <!-- Per-device quirks note (from device-quirks.json) -->
+      <p
+        v-if="quirksNote"
+        class="text-xs text-blue-700 bg-blue-50 border border-blue-100 p-3 rounded-xl"
+        data-testid="quirks-note"
+      >
+        <span class="font-semibold">Device note:</span> {{ quirksNote }}
+      </p>
+
       <!-- Nothing to install -->
       <p
         v-if="checking === false && !hasMissing"
@@ -143,6 +152,7 @@ const wantScan    = computed(() => rawCaps.value.includes('scan'))
 
 const checking    = ref<boolean | null>(null)  // null = not started, true = in progress, false = done
 const checkRows   = ref<CheckRow[]>([])
+const quirksNote  = ref<string>('')
 const hasMissing  = computed(() => checkRows.value.some(r => r.state === 'warn'))
 const installing  = ref(false)
 const installDone = ref(false)
@@ -171,6 +181,11 @@ function checkVirtualDriver() {
   checking.value = false
 }
 
+function applyQuirksNote(q?: { matched?: string, name?: string, notes?: string } | null) {
+  if (!q || !q.matched || q.matched === 'none' || !q.notes) return
+  quirksNote.value = q.name ? `${q.name} — ${q.notes}` : q.notes
+}
+
 async function checkPhysicalDrivers() {
   if (wantPrint.value) checkRows.value.push({ type: 'print', label: 'Print driver', state: 'pending', detail: '' })
   if (wantScan.value)  checkRows.value.push({ type: 'scan',  label: 'Scan driver',  state: 'pending', detail: '' })
@@ -186,9 +201,14 @@ async function checkPhysicalDrivers() {
 
   try {
     const r    = await fetch(`/api/v1/wizard/driver-check?${params}`)
-    const data = await r.json() as { print?: DriverResult | null; scan?: DriverResult | null }
+    const data = await r.json() as {
+      print?: DriverResult | null
+      scan?:  DriverResult | null
+      quirks?: { matched?: string, name?: string, notes?: string } | null
+    }
     updateRow('print', data.print)
     updateRow('scan',  data.scan)
+    applyQuirksNote(data.quirks)
   } catch (err) {
     for (const row of checkRows.value) {
       row.state  = 'error'
@@ -224,7 +244,7 @@ async function installDrivers() {
   const resp = await fetch('/api/v1/wizard/driver-install', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ make: make.value, capabilities: caps }),
+    body:    JSON.stringify({ make: make.value, vidpid: vidpid.value, capabilities: caps }),
   })
 
   if (!resp.body) {

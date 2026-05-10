@@ -18,6 +18,7 @@ const path   = require('node:path');
 const { spawn, execSync, spawnSync } = require('node:child_process');
 const { sanitizePatch } = require('./settings');
 const { isNative, cupsCmd, scanCmd } = require('../lib/deployment');
+const quirks = require('../lib/device-quirks');
 
 /** Allowed characters in a printer/scanner make field. */
 const SAFE_MAKE = /^[A-Za-z0-9 _-]{1,64}$/;
@@ -159,11 +160,27 @@ const SCAN_PKG_MAP = {
   // canon — sane-airscan already installed; escl covered
 };
 
-function printPackages(make) {
-  return PRINT_PKG_MAP[(make || '').toLowerCase()] || [];
+/**
+ * Merge per-device quirks (data/device-quirks.json, by VID:PID) with the
+ * make-level fallback map above. The quirks DB is the authoritative source
+ * for newly-supported devices; the legacy maps cover callers that only
+ * know the brand name and not the USB id.
+ *
+ * @param {string} make
+ * @param {'print' | 'scan'} cap
+ * @param {string} [vidpid]
+ */
+function packagesForCap(make, cap, vidpid) {
+  const fromQuirks = quirks.packagesFor(vidpid || '', make || '', [cap]);
+  const fromMap = (cap === 'print' ? PRINT_PKG_MAP : SCAN_PKG_MAP)[(make || '').toLowerCase()] || [];
+  return [...new Set([...fromQuirks, ...fromMap])];
 }
-function scanPackages(make) {
-  return SCAN_PKG_MAP[(make || '').toLowerCase()] || [];
+
+function printPackages(make, vidpid) {
+  return packagesForCap(make, 'print', vidpid);
+}
+function scanPackages(make, vidpid) {
+  return packagesForCap(make, 'scan', vidpid);
 }
 
 // GET /api/v1/wizard/scan-devices — list SANE-visible scanners via scanimage -L
@@ -184,6 +201,15 @@ router.get('/scan-devices', (_req, res) => {
   }
 });
 
+// GET /api/v1/wizard/quirks — return per-device quirks record (driver hints,
+// SANE backend, blacklists, ipp-usb/AirSane compatibility, notes). Used by
+// the wizard UI to surface "this device needs the ULD driver" hints and by
+// install scripts to consult sane_blacklist without hard-coding model logic.
+router.get('/quirks', (req, res) => {
+  const { vidpid = '', make = '' } = req.query;
+  res.json(quirks.lookup(String(vidpid), String(make)));
+});
+
 // GET /api/v1/wizard/driver-check — check printer + scanner driver availability
 // Query params: vidpid, make, print=1, scan=1
 router.get('/driver-check', (req, res) => {
@@ -191,17 +217,19 @@ router.get('/driver-check', (req, res) => {
   const result = { vidpid, make, print: null, scan: null };
 
   if (wantPrint === '1') {
-    result.print = checkPrintDriver(make);
+    result.print = checkPrintDriver(make, vidpid);
   }
 
   if (wantScan === '1') {
     result.scan = checkScanDriver(make, vidpid);
   }
 
+  result.quirks = quirks.lookup(vidpid, make);
+
   res.json(result);
 });
 
-function checkPrintDriver(make) {
+function checkPrintDriver(make, vidpid) {
   if (make && !SAFE_MAKE.test(make)) {
     return { ok: false, packages: [], detail: 'Invalid make value' };
   }
@@ -213,7 +241,7 @@ function checkPrintDriver(make) {
       ? output.filter(l => l.toLowerCase().includes(make.toLowerCase())).slice(0, 5)
       : output.slice(0, 5);
     const hasPpd  = lines.some(l => l.trim().length > 0);
-    const missing = printPackages(make);
+    const missing = printPackages(make, vidpid);
     let detail;
     if (hasPpd) detail = `PPD found for ${make} in CUPS`;
     else if (missing.length) detail = `No PPD yet — will install: ${missing.join(', ')}`;
@@ -231,7 +259,7 @@ function checkScanDriver(make, vidpid) {
     const saneList = (r.stdout || '') + (r.stderr || '');
     const found    = saneList.toLowerCase().includes(make.toLowerCase()) ||
                      (vidpid && saneList.includes(vidpid.split(':')[0]));
-    const missing  = scanPackages(make);
+    const missing  = scanPackages(make, vidpid);
     let detail;
     if (found) detail = 'Scanner found by SANE';
     else if (missing.length) detail = `Scanner not visible to SANE — will install: ${missing.join(', ')}`;
@@ -257,8 +285,8 @@ router.post('/driver-install', (req, res) => {
   }
 
   const tasks = [];
-  const printPkgs = caps.includes('print') ? printPackages(make) : [];
-  const scanPkgs  = caps.includes('scan')  ? scanPackages(make)  : [];
+  const printPkgs = caps.includes('print') ? printPackages(make, req.body?.vidpid) : [];
+  const scanPkgs  = caps.includes('scan')  ? scanPackages(make, req.body?.vidpid)  : [];
 
   if (printPkgs.length) {
     tasks.push({ container: 'ps-cups',       packages: printPkgs, label: 'print driver' });

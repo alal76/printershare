@@ -1,0 +1,75 @@
+{
+  "$schema": "./device-quirks.schema.json",
+  "$comment": "Per-device fixes / driver hints for printers + scanners + MFPs. Keyed by lowercase 'VID:PID' (USB) or by 'make' substring as fallback. Seed entries reflect findings from real installs and the upstream sources: OpenPrinting (openprinting.org/printers), SANE descriptions (sane-project/backends), and OpenPrinting/ipp-usb device_quirks.go. Add new entries here rather than hard-coding shell hacks in install.sh.",
+  "version": 1,
+  "devices": {
+    "04e8:344f": {
+      "name": "Samsung SCX-3400 Series",
+      "make": "samsung",
+      "kind": "mfp",
+      "print": {
+        "ppd": "suld:Samsung_SCX-3400_Series.ppd.gz",
+        "packages": ["suld-driver2-1.00.39"],
+        "uri_hint": "usb://Samsung/SCX-3400%20Series"
+      },
+      "scan": {
+        "sane_backend": "smfp",
+        "sane_blacklist": ["xerox_mfp"],
+        "packages": ["suld-driver2-1.00.39"]
+      },
+      "ipp_usb": false,
+      "airsane": "ok",
+      "notes": "Samsung ULD (suld-driver2) provides both the PPD and the smfp SANE backend. xerox_mfp also claims this device but its sane_read() returns I/O errors on M-series Samsungs; install.sh must comment xerox_mfp out of /etc/sane.d/dll.conf when smfp.conf is present."
+    },
+    "04a9:*": {
+      "name": "Canon (generic)",
+      "make": "canon",
+      "kind": "auto",
+      "print": { "packages": [] },
+      "scan":  { "sane_backend": "pixma", "packages": [] },
+      "ipp_usb": true,
+      "airsane": "ok",
+      "notes": "Most modern Canon MFPs speak IPP-over-USB + eSCL; ipp-usb + sane-airscan cover them without vendor drivers."
+    },
+    "03f0:*": {
+      "name": "HP (generic)",
+      "make": "hp",
+      "kind": "auto",
+      "print": { "packages": ["hplip"] },
+      "scan":  { "sane_backend": "hpaio", "packages": ["libsane-hpaio"] },
+      "ipp_usb": true,
+      "airsane": "ok",
+      "notes": "HPLIP is preferred over driverless for older HP devices. hplip-data ships PPDs for ~3000 models."
+    },
+    "04b8:*": {
+      "name": "Epson (generic)",
+      "make": "epson",
+      "kind": "auto",
+      "print": { "packages": ["printer-driver-escpr"] },
+      "scan":  { "sane_backend": "epson2", "packages": ["libsane-epson2", "epsonscan2"] },
+      "ipp_usb": true,
+      "airsane": "ok",
+      "notes": "Use Epson's escpr driver for current models; the older 'epson' backend has been removed from libsane. epsonscan2 (proprietary) covers ET / WF series; epson2 (SANE) covers older Perfection scanners."
+    },
+    "04f9:*": {
+      "name": "Brother (generic)",
+      "make": "brother",
+      "kind": "auto",
+      "print": { "packages": ["printer-driver-brlaser"] },
+      "scan":  { "sane_backend": "brother4", "packages": ["brscan4"] },
+      "ipp_usb": true,
+      "airsane": "ok",
+      "notes": "Most Brother lasers use brlaser. Brother's own brscanX packages are arch-specific and need a per-model deb from their site — not in Debian repos."
+    }
+  },
+  "fallbacks": {
+    "hp":      { "print": { "packages": ["hplip"] },                      "scan": { "packages": ["libsane-hpaio"] } },
+    "epson":   { "print": { "packages": ["printer-driver-escpr"] },       "scan": { "packages": ["libsane-epson2"] } },
+    "brother": { "print": { "packages": ["printer-driver-brlaser"] },     "scan": { "packages": ["libsane-hpaio"] } },
+    "samsung": { "print": { "packages": ["printer-driver-splix"] },       "scan": { "packages": [] } },
+    "lexmark": { "print": { "packages": ["printer-driver-foo2zjs"] },     "scan": { "packages": [] } },
+    "canon":   { "print": { "packages": [] },                              "scan": { "packages": [] } },
+    "xerox":   { "print": { "packages": [] },                              "scan": { "packages": [] } },
+    "ricoh":   { "print": { "packages": [] },                              "scan": { "packages": [] } }
+  }
+}
