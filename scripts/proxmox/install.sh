@@ -224,6 +224,12 @@ info "Building portal"
 cd "$REPO_DIR/portal"
 npm ci --silent
 npm run build --silent
+# The Express server serves the SPA from portal/public/ (matches the
+# Docker stage that does `COPY dist ./public`). On native installs we
+# build into portal/dist/ and need to mirror it into public/, preserving
+# the static manifest.json + icons already shipped in public/.
+mkdir -p "$REPO_DIR/portal/public"
+cp -rf "$REPO_DIR/portal/dist/." "$REPO_DIR/portal/public/"
 
 cat >/etc/systemd/system/printershare-portal.service <<UNIT
 [Unit]
