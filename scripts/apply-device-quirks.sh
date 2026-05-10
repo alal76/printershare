@@ -120,15 +120,7 @@ while read -r vid pid; do
     while read -r pkg; do
         [[ -n "$pkg" ]] && SEEN_PKGS[$pkg]=1
     done < <(emit_packages "$rec")
-done < <(lsusb | awk '{
-    # Lines look like:  Bus 001 Device 003: ID 04e8:344f Samsung Electronics ...
-    # Use RSTART/RLENGTH (POSIX) so we work on mawk as well as gawk.
-    if (match($0, /ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}/)) {
-        s = substr($0, RSTART + 3, 9)   # "04e8:344f"
-        gsub(":", " ", s)
-        print s
-    }
-}')
+done < <(lsusb | grep -oE 'ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}' | sed -E 's/^ID //; s/:/ /')
 
 info "$matched_count device(s) matched the quirks catalogue"
 
