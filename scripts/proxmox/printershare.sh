@@ -152,8 +152,9 @@ lxc.mount.entry: /dev/bus/usb dev/bus/usb none bind,create=dir,optional 0 0
 # /sys/bus/usb gives SANE backends the option to do unbind/bind resets
 # (helps with flaky multifunction devices like Samsung SCX-3400).
 lxc.mount.entry: /sys/bus/usb sys/bus/usb none bind,create=dir,optional 0 0
-# Keep CAP_SYS_ADMIN for USBDEVFS_RESET ioctls used by some SANE backends.
-lxc.cap.keep: sys_admin
+# Privileged containers already keep CAP_SYS_ADMIN by default — no
+# `lxc.cap.keep` line needed (and it would conflict with PVE's default
+# `lxc.cap.drop`).  USBDEVFS_RESET ioctls work out of the box.
 # AppArmor profile — unconfined is required for usbfs ioctls.
 lxc.apparmor.profile: unconfined
 CONF
