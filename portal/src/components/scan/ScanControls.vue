@@ -128,17 +128,7 @@ const opts = ref({ resolution: '300', color: 'color', format: 'pdf', source: 'fl
 async function startScan() {
   scanning.value = true
   try {
-    // 1. Fetch context to discover the active SANE device id and pipelines.
-    //    The /scan/api/v1/context endpoint is read-only and doesn't claim the
-    //    device, so it doesn't need the device-lock.
-    const ctxRes = await fetch('/scan/api/v1/context')
-    if (!ctxRes.ok) throw new Error(`No scanner available (HTTP ${ctxRes.status})`)
-    const ctx = await ctxRes.json()
-    const device = ctx.devices?.[0]
-    if (!device) throw new Error('No scanner detected. Plug in a USB scanner and reset detection.')
-
-    // 2. Map our simple form options to scanservjs's expected values.
-    //    scanservjs is case-sensitive on mode/source.
+    // Map form options to scanservjs's expected values (case-sensitive).
     const modeMap: Record<string, string> = {
       color:   'Color',
       gray:    'Gray',
@@ -151,28 +141,26 @@ async function startScan() {
     const mode   = modeMap[opts.value.color]   ?? 'Color'
     const source = sourceMap[opts.value.source] ?? 'Flatbed'
 
-    // 3. Pick a pipeline matching the chosen output format.
-    const pipelines: string[] = device.settings?.pipeline?.options ?? []
+    // Pick a pipeline name matching the chosen format.  The portal-side
+    // /api/v1/scans/run endpoint will fall back to the device's default
+    // pipeline if this one isn't recognised.
     const fmt = opts.value.format
-    const pickPipeline = (): string => {
-      const find = (re: RegExp) => pipelines.find(p => re.test(p))
-      if (fmt === 'pdf')  return find(/^PDF .*high-quality/i) ?? find(/^PDF/i) ?? pipelines[0]
-      if (fmt === 'jpg')  return find(/^JPG .*high-quality/i) ?? find(/^JPG/i) ?? pipelines[0]
-      if (fmt === 'png')  return find(/^PNG/i) ?? pipelines[0]
-      if (fmt === 'tiff') return find(/^TIF/i) ?? pipelines[0]
-      return device.settings?.pipeline?.default ?? pipelines[0]
+    const pipelineByFormat: Record<string, string> = {
+      pdf:  'PDF (Searchable, high-quality)',
+      jpg:  'JPG | @:pipeline.high-quality',
+      png:  'PNG | @:pipeline.high-quality',
+      tiff: 'TIF | @:pipeline.high-quality',
     }
-    const pipeline = pickPipeline()
-    if (!pipeline) throw new Error('Scanner has no available pipelines')
+    const pipeline = pipelineByFormat[fmt]
 
-    // 4. POST the scan request through the portal so CUPS releases the
-    //    USB device while SANE scans, then reclaims it afterwards.
+    // POST through the portal so CUPS releases the USB interface while
+    // SANE scans, then reclaims it afterwards.  Device discovery happens
+    // server-side under the same lock.
     const r = await fetch('/api/v1/scans/run', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({
         params: {
-          deviceId:   device.id,
           resolution: Number(opts.value.resolution),
           mode,
           source,

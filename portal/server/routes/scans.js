@@ -64,21 +64,50 @@ router.delete('/:filename', (req, res) => {
 /**
  * POST /api/v1/scans/run
  * Body: scanservjs scan request payload
- *   { params: { deviceId, mode, source, resolution, ... },
- *     pipeline, filters, batch, index }
+ *   { params: { deviceId?, mode, source, resolution, ... },
+ *     pipeline?, filters?, batch?, index? }
  *
  * Acquires the device lock so CUPS releases the USB interface, forwards the
  * request to scanservjs, then returns the device to CUPS.  Concurrent scan
  * requests serialize behind the same lock; a print job in flight blocks the
  * scan until the print finishes (cupsdisable -h waits for active jobs).
+ *
+ * If `params.deviceId` is missing, the handler fetches /context (under the
+ * lock, so SANE can see the device after CUPS released it) and uses the
+ * first available device.  If `pipeline` is missing, the device's default
+ * pipeline is used.
  */
 router.post('/run', async (req, res) => {
   try {
     const result = await withScanLock(async () => {
+      const userPayload = req.body ?? {};
+      let payload = userPayload;
+
+      // If the caller didn't pin a deviceId, discover it now (under the lock).
+      if (!userPayload?.params?.deviceId) {
+        const ctxRes = await fetch(`${SCANSERVJS_URL}/api/v1/context`);
+        if (!ctxRes.ok) {
+          return { status: 503, body: { error: 'scanservjs context unavailable' } };
+        }
+        const ctx = await ctxRes.json();
+        const device = ctx.devices?.[0];
+        if (!device) {
+          return { status: 404, body: { error: 'No scanner detected' } };
+        }
+        payload = {
+          ...userPayload,
+          params: { ...userPayload.params, deviceId: device.id },
+          pipeline: userPayload.pipeline || device.settings?.pipeline?.default,
+          filters:  userPayload.filters  ?? [],
+          batch:    userPayload.batch    ?? 'none',
+          index:    userPayload.index    ?? 1,
+        };
+      }
+
       const upstream = await fetch(`${SCANSERVJS_URL}/api/v1/scan`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(req.body ?? {}),
+        body:    JSON.stringify(payload),
       });
       const text = await upstream.text();
       let body;
