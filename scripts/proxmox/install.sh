@@ -159,23 +159,30 @@ if dpkg -s suldr-keyring &>/dev/null && ! dpkg -s suld-driver2-1.00.39 &>/dev/nu
         warn "ULD package install failed — scanner may not work"
 fi
 
-# ── SANE: append Samsung SCX-3400 USB ID if missing ─────────────────────────
-# Enable the xerox_mfp backend in dll.conf (Debian ships it commented out
-# on some installs). Without this, scanimage -L returns "no scanners".
-# Note: ULD installs the smfp backend; we keep xerox_mfp enabled as a
-# fallback for other Samsung devices that may be plugged in later.
-if grep -qE '^#\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
-    sed -ri 's/^#\s*(xerox_mfp)\b/\1/' /etc/sane.d/dll.conf
-elif ! grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
-    echo 'xerox_mfp' >>/etc/sane.d/dll.conf
+# ── SANE: prefer ULD's smfp backend, disable xerox_mfp for SCX-3400 ────────
+# The xerox_mfp backend recognises the SCX-3400 USB ID but its sane_read()
+# fails ("Error during device I/O") on M-series Samsung devices. The
+# proprietary smfp backend (shipped by the ULD via /etc/sane.d/dll.d/
+# smfp-scanner) works reliably. We comment out xerox_mfp in dll.conf so
+# scanimage -L / scanservjs only sees the smfp device.
+if [[ -f /etc/sane.d/smfp.conf ]] && grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
+    sed -ri 's/^(\s*)(xerox_mfp\b)/\1# \2/' /etc/sane.d/dll.conf
 fi
-if ! grep -q '0x344f' /etc/sane.d/xerox_mfp.conf 2>/dev/null; then
-    info "Adding Samsung SCX-3400 (04e8:344f) to xerox_mfp backend"
-    {
-        echo
-        echo '# printershare: Samsung SCX-3400 Series'
-        echo 'usb 0x04e8 0x344f'
-    } >>/etc/sane.d/xerox_mfp.conf
+if [[ ! -f /etc/sane.d/smfp.conf ]]; then
+    # Fallback for hosts without ULD: enable xerox_mfp and add the SCX-3400 ID.
+    if grep -qE '^#\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
+        sed -ri 's/^#\s*(xerox_mfp)\b/\1/' /etc/sane.d/dll.conf
+    elif ! grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
+        echo 'xerox_mfp' >>/etc/sane.d/dll.conf
+    fi
+    if ! grep -q '0x344f' /etc/sane.d/xerox_mfp.conf 2>/dev/null; then
+        info "Adding Samsung SCX-3400 (04e8:344f) to xerox_mfp backend"
+        {
+            echo
+            echo '# printershare: Samsung SCX-3400 Series'
+            echo 'usb 0x04e8 0x344f'
+        } >>/etc/sane.d/xerox_mfp.conf
+    fi
 fi
 # saned (network scanner) — bind on all interfaces; nginx fronts it.
 grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
