@@ -31,3 +31,11 @@ COPY scripts/scan-save-upload.sh /usr/local/bin/scan-save-upload.sh
 
 RUN chmod 755 /usr/local/bin/scan-save-upload.sh && \
     mkdir -p /app/data/output
+
+# ── Add USB IDs of MFPs not yet in upstream sane-backends ─────────
+# Samsung SCX-3400 Series (xerox_mfp backend) — VID:PID 04e8:344f.
+# Without this entry scanimage -L returns "No scanners found" even
+# though sane-find-scanner detects the device.
+RUN grep -q '0x344f' /etc/sane.d/xerox_mfp.conf || \
+    printf '\n# printershare: Samsung SCX-3400 Series\nusb 0x04e8 0x344f\n' \
+    >> /etc/sane.d/xerox_mfp.conf
