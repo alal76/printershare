@@ -156,11 +156,9 @@ verify_lxc_config() {
         pct config "$ctid" 2>&1 | head -10 | sed 's/^/    /'
         die "config rejected by pct"
     fi
-    if ! lxc-info -n "$ctid" -p >/dev/null 2>&1; then
-        msg_err "lxc-info rejected the config:"
-        lxc-info -n "$ctid" -p 2>&1 | head -10 | sed 's/^/    /'
-        die "config rejected by lxc-info — inspect /etc/pve/lxc/${ctid}.conf"
-    fi
+    # `lxc-info -p` only works on running CTs (returns "doesn't exist" for
+    # stopped ones), so we don't use it here.  pct start will surface any
+    # remaining config errors with a clear message of its own.
 }
 
 # Run the in-CT installer (always fetched fresh).
