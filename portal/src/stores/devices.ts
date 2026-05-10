@@ -24,9 +24,17 @@ export interface CupsPrinter {
   uri:   string
 }
 
+export interface SaneScanner {
+  device: string
+  vendor: string
+  model:  string
+  type:   string
+}
+
 export const useDevicesStore = defineStore('devices', () => {
   const usb      = ref<UsbDevice[]>([])
   const printers = ref<CupsPrinter[]>([])
+  const scanners = ref<SaneScanner[]>([])
   const loading  = ref(false)
   const error    = ref<string | null>(null)
 
@@ -39,6 +47,7 @@ export const useDevicesStore = defineStore('devices', () => {
       const data = await r.json()
       usb.value      = data.usb      ?? []
       printers.value = data.printers ?? []
+      scanners.value = data.scanners ?? []
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -97,7 +106,7 @@ export const useDevicesStore = defineStore('devices', () => {
   }
 
   return {
-    usb, printers, loading, error,
+    usb, printers, scanners, loading, error,
     fetchDevices, addPrinter, autoAddPrinter, removePrinter,
     resetAll, testPrint: testPrintDevice,
   }

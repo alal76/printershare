@@ -115,8 +115,36 @@ router.get('/', (_req, res) => {
     }
   } catch { /* CUPS not available */ }
 
-  res.json({ usb, printers });
+  // --- SANE scanners via scanimage -L ---
+  const scanners = collectSaneScanners();
+
+  res.json({ usb, printers, scanners });
 });
+
+/**
+ * Parse `scanimage -L` output into a list of scanner descriptors.
+ * Output format:
+ *   device `xerox_mfp:libusb:001:002' is a Samsung SCX-3400 Series ...
+ * @returns {Array<{device:string, vendor:string, model:string, type:string}>}
+ */
+function collectSaneScanners() {
+  let raw = '';
+  try {
+    const r = spawnSync('docker', ['exec', 'ps-scanservjs', 'scanimage', '-L'], {
+      timeout: 10_000, encoding: 'utf8',
+    });
+    raw = (r.stdout || '') + (r.stderr || '');
+  } catch {
+    return [];
+  }
+  const out = [];
+  const re = /^device `([^']+)'\s+is\s+a\s+(\S+)\s+(.+?)\s+(\S+)\s*$/gm;
+  let m;
+  while ((m = re.exec(raw)) !== null) {
+    out.push({ device: m[1], vendor: m[2], model: m[3], type: m[4] });
+  }
+  return out;
+}
 
 /**
  * Collect manufacturer names from CUPS-detected USB printers (`lpinfo -v`).

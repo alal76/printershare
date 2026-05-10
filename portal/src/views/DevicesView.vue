@@ -126,6 +126,58 @@
         </div>
       </section>
 
+      <!-- ── SANE Scanners ──────────────────────────────────────────────── -->
+      <section>
+        <h2 class="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
+          <ScanIcon class="w-4 h-4 text-primary-600" />
+          Scanners
+          <span class="text-xs font-normal text-gray-400">(via SANE)</span>
+        </h2>
+
+        <div
+          v-if="devices.scanners.length === 0 && !devices.loading"
+          class="flex flex-col items-center py-8 border-2 border-dashed border-gray-200 rounded-2xl text-center"
+        >
+          <ScanIcon class="w-8 h-8 text-gray-200 mb-2" />
+          <p class="text-sm text-gray-500">
+            No scanners detected
+          </p>
+          <p class="text-xs text-gray-400 mt-1 max-w-md">
+            Plug in a scanner or MFP. Some models need a vendor SANE backend
+            (e.g. <code>libsane-hpaio</code>) — see the Setup wizard.
+          </p>
+        </div>
+
+        <div class="grid gap-3">
+          <Card
+            v-for="s in devices.scanners"
+            :key="s.device"
+            :padding="false"
+            :data-testid="`scanner-${s.device}`"
+          >
+            <div class="flex items-center gap-4 p-4">
+              <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center flex-shrink-0">
+                <ScanIcon class="w-5 h-5 text-green-600" />
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-gray-900 truncate">
+                  {{ s.vendor }} {{ s.model }}
+                </p>
+                <p class="text-xs text-gray-400 truncate mt-0.5">
+                  {{ s.device }} · {{ s.type }}
+                </p>
+              </div>
+              <RouterLink
+                to="/scan"
+                class="text-xs font-medium text-primary-600 hover:text-primary-700"
+              >
+                Scan →
+              </RouterLink>
+            </div>
+          </Card>
+        </div>
+      </section>
+
       <!-- ── USB Devices ────────────────────────────────────────────────── -->
       <section>
         <h2 class="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
@@ -343,6 +395,7 @@ import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useDevicesStore, testPrintDevice } from '@/stores/devices'
 import type { UsbDevice } from '@/stores/devices'
 import { useToastStore }  from '@/stores/toast'
+import { RouterLink } from 'vue-router'
 
 type SvcStatus = 'ok' | 'warning' | 'error' | 'pending' | 'offline' | 'unknown'
 
