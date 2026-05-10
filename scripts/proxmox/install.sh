@@ -217,7 +217,14 @@ if [[ -n "$PRINTER_URI" ]] && ! lpstat -p 2>/dev/null | grep -q '^printer .* USB
                         ;;
                 esac
                 [[ -n "$PPD" ]] && break
-            done < <(lsusb | awk 'match($0,/ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})/,m){print m[1], m[2]}')
+            done < <(lsusb | awk '{
+                # POSIX-portable VID:PID extractor (works on mawk + gawk).
+                if (match($0, /ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}/)) {
+                    s = substr($0, RSTART + 3, 9)
+                    gsub(":", " ", s)
+                    print s
+                }
+            }')
         fi
         # 3. Last-ditch: fuzzy search by model name embedded in the USB URI.
         if [[ -z "$PPD" ]]; then

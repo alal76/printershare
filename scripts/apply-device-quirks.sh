@@ -122,8 +122,12 @@ while read -r vid pid; do
     done < <(emit_packages "$rec")
 done < <(lsusb | awk '{
     # Lines look like:  Bus 001 Device 003: ID 04e8:344f Samsung Electronics ...
-    match($0, /ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})/, m)
-    if (m[1] != "") print m[1], m[2]
+    # Use RSTART/RLENGTH (POSIX) so we work on mawk as well as gawk.
+    if (match($0, /ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}/)) {
+        s = substr($0, RSTART + 3, 9)   # "04e8:344f"
+        gsub(":", " ", s)
+        print s
+    }
 }')
 
 info "$matched_count device(s) matched the quirks catalogue"
