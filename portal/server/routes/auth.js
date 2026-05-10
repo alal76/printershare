@@ -51,14 +51,17 @@ function clearAttempts(ip) {
   loginAttempts.delete(ip);
 }
 
-function setSessionCookie(res, token) {
-  const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+function setSessionCookie(res, req, token) {
+  // Use Secure only when the request actually arrived over HTTPS (either
+  // directly or via a reverse proxy that sets X-Forwarded-Proto).
+  const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const isHttps = proto === 'https' || String(process.env.PORTAL_SECURE_COOKIES || '').toLowerCase() === 'true';
   const attrs = [
     `ps_session=${encodeURIComponent(token)}`,
     'Path=/',
     'HttpOnly',
     'SameSite=Lax',
-    isProd ? 'Secure' : '',
+    isHttps ? 'Secure' : '',
     'Max-Age=28800',
   ].filter(Boolean);
   res.setHeader('Set-Cookie', attrs.join('; '));
@@ -96,7 +99,7 @@ router.post('/login', (req, res) => {
   }
   clearAttempts(ip);
   const token = createSessionToken(String(username));
-  setSessionCookie(res, token);
+  setSessionCookie(res, req, token);
   return res.json({ ok: true, authEnabled: true, user: username, mustChangePassword: isDefaultPassword() });
 });
 
