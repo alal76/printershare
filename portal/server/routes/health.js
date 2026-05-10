@@ -2,7 +2,7 @@
 
 const router = require('express').Router();
 const { execFile } = require('node:child_process');
-const { isNative, serviceRunning } = require('../lib/deployment');
+const { isNative, serviceRunning, serviceConfigured } = require('../lib/deployment');
 
 // In native mode, CUPS and scanservjs run on localhost; in Docker we
 // reach them via the compose network DNS / host.docker.internal.
@@ -40,13 +40,9 @@ function fetchWithTimeout(url, ms) {
 }
 
 /**
- * Check whether a logical service is currently running. Delegates to the
- * deployment helper, which uses `docker inspect` in Docker mode and
- * `systemctl is-active` in native mode.
+ * Build a service status entry, returning `disabled` when the owning profile
+ * is not active.
  */
-function containerRunning(name) {
-  return serviceRunning(name);
-}
 
 /**
  * Module-level Tailscale status cache.  Refreshed every 60 s via an
@@ -112,17 +108,17 @@ router.get('/', async (_req, res) => {
 
   const services = {
     cups:       { status: cups.ok       ? 'ok' : 'error', latency_ms: cups.latency_ms,      message: cups.message },
-    'ipp-usb':  serviceStatus(true,          containerRunning('ipp-usb')),
+    'ipp-usb':  serviceStatus(serviceConfigured('ipp-usb'), serviceRunning('ipp-usb')),
     scanservjs: { status: scanservjs.ok ? 'ok' : 'error', latency_ms: scanservjs.latency_ms, message: scanservjs.message },
     paperless:  serviceStatus(docsEnabled,   paperless.ok, paperless.latency_ms),
-    samba:      serviceStatus(true,          containerRunning('samba')),
-    nfs:        serviceStatus(nfsEnabled,    containerRunning('nfs')),
+    samba:      serviceStatus(serviceConfigured('samba'), serviceRunning('samba')),
+    nfs:        serviceStatus(nfsEnabled && serviceConfigured('nfs'), serviceRunning('nfs')),
     tailscale:  (() => {
-      if (!remoteEnabled) return { status: 'disabled', latency_ms: 0 };
+      if (!remoteEnabled || !serviceConfigured('tailscale')) return { status: 'disabled', latency_ms: 0 };
       const ts = tailscaleStatus();
       return { status: ts.connected ? 'ok' : 'offline', latency_ms: 0, ip: ts.ip };
     })(),
-    cloudflare: serviceStatus(remoteEnabled, containerRunning('cloudflared')),
+    cloudflare: serviceStatus(remoteEnabled && serviceConfigured('cloudflared'), serviceRunning('cloudflared')),
   };
 
   const hasError = Object.values(services).some(s => s.status === 'error');

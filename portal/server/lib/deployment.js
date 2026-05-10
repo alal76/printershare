@@ -140,6 +140,29 @@ function serviceRunning(name) {
 }
 
 /**
+ * Check whether a logical service is *configured* in the current deployment.
+ *
+ * Docker mode → always true (we assume the compose file defines it; the
+ *   caller distinguishes "in profile" via COMPOSE_PROFILES).
+ * Native mode → `systemctl cat <unit>` exits 0 only if the unit file is
+ *   actually installed on this host.
+ *
+ * Used by /api/v1/health to surface `disabled` (not part of this install)
+ * vs `offline` (installed but not running).
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+function serviceConfigured(name) {
+  const entry = SERVICE_MAP[name];
+  if (!entry) return false;
+  if (!isNative()) return Boolean(entry.container);
+  if (!entry.unit) return false;
+  const r = spawnSync('systemctl', ['cat', entry.unit], { encoding: 'utf8', timeout: 3_000 });
+  return r.status === 0;
+}
+
+/**
  * Restart a logical service.
  * @param {string} name
  * @param {number} [timeout=30000]
@@ -198,6 +221,7 @@ module.exports = {
   runCupsSync,
   runScanSync,
   serviceRunning,
+  serviceConfigured,
   restartService,
   streamLogs,
 };
