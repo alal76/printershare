@@ -98,6 +98,7 @@ router.get('/', async (_req, res) => {
   const profiles = activeProfiles();
   const docsEnabled   = profiles.has('docs');
   const remoteEnabled = profiles.has('remote');
+  const nfsEnabled    = profiles.has('nfs');
 
   const [cups, scanservjs, paperless] = await Promise.all([
     probe(`http://${CUPS_HOST}:${CUPS_PORT}/`),
@@ -111,7 +112,7 @@ router.get('/', async (_req, res) => {
     scanservjs: { status: scanservjs.ok ? 'ok' : 'error', latency_ms: scanservjs.latency_ms, message: scanservjs.message },
     paperless:  serviceStatus(docsEnabled,   paperless.ok, paperless.latency_ms),
     samba:      serviceStatus(true,          containerRunning('ps-samba')),
-    nfs:        serviceStatus(true,          containerRunning('ps-nfs')),
+    nfs:        serviceStatus(nfsEnabled,    containerRunning('ps-nfs')),
     tailscale:  (() => {
       if (!remoteEnabled) return { status: 'disabled', latency_ms: 0 };
       const ts = tailscaleStatus();

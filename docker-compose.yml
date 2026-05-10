@@ -10,10 +10,11 @@ name: printershare
 #    ipp-usb     IPP-over-USB proxy (AirPrint/AirScan)
 #    scanservjs  Scanner backend              http://<HOST>/scan/
 #    samba       SMB/CIFS share              \\<HOST>\Scans
-#    nfs         NFS share                   <HOST>:/exports/scans
 #    nginx       Reverse proxy               http://<HOST>:80
 #
 #  Optional profiles:
+#    nfs         NFS share                   <HOST>:/exports/scans
+#                (requires nfs/nfsd kernel modules on Docker host)
 #    docs        Paperless-ngx DMS            http://<HOST>/docs/
 #    remote      Tailscale VPN + Cloudflare tunnel
 #
@@ -176,7 +177,15 @@ services:
 
   # ── NFS ────────────────────────────────────────────────────────
   # Linux/macOS: mount <HOST>:/exports/scans
+  # Requires the `nfs` and `nfsd` kernel modules to be loaded on the Docker
+  # host. In LXC containers (e.g. Proxmox unprivileged CTs) modules cannot
+  # be loaded from inside; load them on the PVE host with:
+  #   echo -e 'nfs\nnfsd' | sudo tee /etc/modules-load.d/nfs.conf
+  #   sudo modprobe nfs nfsd
+  # Then enable the service via:  COMPOSE_PROFILES=nfs docker compose up -d
+  # SMB (samba) is enabled by default and covers Linux/macOS/Windows clients.
   nfs:
+    profiles: ["nfs"]
     image: erichough/nfs-server:latest
     container_name: ps-nfs
     restart: unless-stopped

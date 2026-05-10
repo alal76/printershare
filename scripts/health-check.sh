@@ -11,8 +11,10 @@
 # ────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# Default to nginx (port 80) which fronts the portal API, static assets,
+# and CUPS admin. Only override if you've published the portal directly.
 HOST="${PORTAL_HOST:-localhost}"
-PORT="${PORTAL_PORT:-3000}"
+PORT="${PORTAL_PORT:-80}"
 RETRIES=10
 WAIT=3
 FAILURES=0
