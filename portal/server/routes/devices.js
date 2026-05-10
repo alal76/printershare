@@ -161,34 +161,23 @@ function collectSaneUsbDevices() {
 
 /**
  * Look up the CUPS device URI for a given USB vid:pid.
- * Runs `lpinfo --include-schemes=usb -lv` and matches by device-id.
+ * Parses `lpinfo -v` lines that look like:
+ *   direct usb://Samsung/SCX-3400%20Series?serial=…
+ * and matches the manufacturer to the vendor ID.
  * @param {string} vidpid
  * @returns {{ uri: string, make: string, model: string } | null}
  */
 function findCupsUriForVidPid(vidpid) {
   try {
-    const out = runCups(['lpinfo', '--include-schemes=usb', '-l', '-v'], 10_000);
-    // lpinfo -l output blocks:
-    //   Device: uri = usb://Samsung/SCX-3400%20Series?serial=…
-    //           class = direct
-    //           make-and-model = Samsung SCX-3400 Series
-    //           device-id = MFG:Samsung;CMD:SPL,GDI;MDL:SCX-3400 Series;
-    const blocks = out.split(/^Device:/m).slice(1);
-    for (const blk of blocks) {
-      const uriMatch  = /uri\s*=\s*(\S+)/.exec(blk);
-      const mmMatch   = /make-and-model\s*=\s*([^\n]+)/.exec(blk);
-      if (!uriMatch) continue;
-      const uri = uriMatch[1];
-      // Pull make/model from the URI itself: usb://<Make>/<Model>?…
-      const usbRe = /^usb:\/\/([^/?]+)\/([^?]+)/;
-      const u = usbRe.exec(uri);
-      const make  = u ? decodeURIComponent(u[1]) : '';
-      let model = '';
-      if (u) model = decodeURIComponent(u[2]);
-      else if (mmMatch) model = mmMatch[1].trim();
-
-      // Match: the lsusb description contains the make and model,
-      // or the device-id MFG matches a known vendor for this vidpid.
+    const out = runCups(['lpinfo', '-v'], 10_000);
+    const usbLineRe = /^\s*\S+\s+(usb:\/\/([^/?]+)\/([^?\s]+)(?:\?\S*)?)/gm;
+    let m;
+    while ((m = usbLineRe.exec(out)) !== null) {
+      const [, uri, makeEnc, modelEnc] = m;
+      const make  = decodeURIComponent(makeEnc);
+      const model = decodeURIComponent(modelEnc);
+      // Skip CUPS' generic placeholder when it can't read the device-id.
+      if (make.toLowerCase() === 'unknown') continue;
       if (vidpidMatchesMake(vidpid, make)) {
         return { uri, make, model };
       }
