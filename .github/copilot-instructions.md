@@ -43,6 +43,26 @@ Current cloud backup keys: `RCLONE_GDRIVE_REMOTE`, `RCLONE_ONEDRIVE_REMOTE`.
 
 ---
 
+## 3a. Device Quirks Catalogue — Single Source of Truth
+
+The canonical per-device fix table lives in
+`portal/server/data/device-quirks.json` and is consulted by both
+`portal/server/lib/device-quirks.js` (server + wizard) and
+`scripts/apply-device-quirks.sh` (installer + post-hotplug reconciler).
+
+- **Never hardcode a model check** ("if Samsung SCX-3400 then …") in
+  `scripts/proxmox/install.sh`, `scripts/apply-device-quirks.sh`, or any
+  portal route. Add or edit a catalogue entry instead.
+- The catalogue is the **only** writer of `/etc/sane.d/dll.conf` blacklists.
+  Editing `dll.conf` from another shell block is an anti-pattern.
+- New entries must follow the schema documented in the README
+  ([Device quirks catalogue](../README.md#device-quirks-catalogue)) and
+  must be keyed by lowercase `vid:pid` (or `vid:*` vendor wildcard).
+- The unit tests in `portal/tests/unit/server/device-quirks.test.ts` must
+  continue to pass; add tests for new lookup edge cases.
+
+---
+
 ## 4. Security Invariants
 
 - All `/api/v1/*` routes (except `/api/v1/auth/*` and `/api/v1/health`) **must pass through

@@ -210,6 +210,31 @@ router.get('/quirks', (req, res) => {
   res.json(quirks.lookup(String(vidpid), String(make)));
 });
 
+// POST /api/v1/wizard/apply-quirks — re-run scripts/apply-device-quirks.sh
+// against the connected USB devices and return the list of packages it
+// suggests installing + any blacklist actions it took. Native-mode only;
+// requires the portal to run as root (it does, by default, under systemd).
+//
+// Use this from the UI after the user plugs in a new device, so SANE
+// backends are reconciled without rebooting or re-running the installer.
+router.post('/apply-quirks', (_req, res) => {
+  if (!isNative()) {
+    return res.status(400).json({ error: 'apply-quirks is only available in native deployment mode' });
+  }
+  const script = path.join(__dirname, '..', '..', '..', 'scripts', 'apply-device-quirks.sh');
+  if (!fs.existsSync(script)) {
+    return res.status(500).json({ error: `helper script missing at ${script}` });
+  }
+  const r = spawnSync('bash', [script], { timeout: 30000, encoding: 'utf8' });
+  const packages = (r.stdout || '').split('\n').map(s => s.trim()).filter(Boolean);
+  res.json({
+    ok:       r.status === 0,
+    packages,
+    log:      (r.stderr || '').trim(),
+    exitCode: r.status,
+  });
+});
+
 // GET /api/v1/wizard/driver-check — check printer + scanner driver availability
 // Query params: vidpid, make, print=1, scan=1
 router.get('/driver-check', (req, res) => {

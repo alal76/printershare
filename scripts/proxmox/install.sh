@@ -133,78 +133,99 @@ systemctl restart cups
 systemctl enable --now avahi-daemon
 
 # ── Samsung Unified Linux Driver (ULD) ──────────────────────────────────────
-# The community Debian repo at bchemnet.com/suldr packages Samsung's
-# proprietary print + scan driver (smfp SANE backend). The open-source
-# xerox_mfp backend fails to scan on M-series devices like the SCX-3400
-# (bulk-IN times out), so we install the ULD for reliable scanning. The
-# keyring ships as suldr-keyring_4_all.deb; download + dpkg -i it first,
-# then the apt repo becomes verifiable.
-info "Installing Samsung Unified Linux Driver (ULD)"
-if ! dpkg -s suldr-keyring &>/dev/null; then
-    KEYRING_DEB=$(mktemp --suffix=.deb)
-    if wget -qO "$KEYRING_DEB" https://www.bchemnet.com/suldr/pool/debian/extra/su/suldr-keyring_4_all.deb; then
-        dpkg -i "$KEYRING_DEB" || warn "suldr-keyring install failed"
-    else
-        warn "Could not fetch suldr-keyring .deb — skipping ULD install"
+# Samsung's smfp SANE backend + Samsung PPDs ship via the community
+# bchemnet.com/suldr apt repo (Samsung never published this driver to
+# Debian). We only bootstrap the suldr-keyring + apt source when a
+# Samsung USB device (VID 04e8) is currently attached — keeps the install
+# fast and minimal on hosts that don't need it. The actual ULD packages
+# (e.g. suld-driver2-1.00.39) come from the quirks catalogue further down.
+if lsusb 2>/dev/null | grep -qiE 'ID 04e8:'; then
+    info "Samsung device detected — bootstrapping ULD apt repo"
+    if ! dpkg -s suldr-keyring &>/dev/null; then
+        KEYRING_DEB=$(mktemp --suffix=.deb)
+        if wget -qO "$KEYRING_DEB" https://www.bchemnet.com/suldr/pool/debian/extra/su/suldr-keyring_4_all.deb; then
+            dpkg -i "$KEYRING_DEB" || warn "suldr-keyring install failed"
+        else
+            warn "Could not fetch suldr-keyring .deb — skipping ULD repo"
+        fi
+        rm -f "$KEYRING_DEB"
     fi
-    rm -f "$KEYRING_DEB"
-fi
-if dpkg -s suldr-keyring &>/dev/null && [[ ! -f /etc/apt/sources.list.d/suldr.list ]]; then
-    echo "deb https://www.bchemnet.com/suldr/ debian extra" \
-        >/etc/apt/sources.list.d/suldr.list
-    apt-get update -qq || true
-fi
-if dpkg -s suldr-keyring &>/dev/null && ! dpkg -s suld-driver2-1.00.39 &>/dev/null; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq suld-driver2-1.00.39 || \
-        warn "ULD package install failed — scanner may not work"
+    if dpkg -s suldr-keyring &>/dev/null && [[ ! -f /etc/apt/sources.list.d/suldr.list ]]; then
+        echo "deb https://www.bchemnet.com/suldr/ debian extra" \
+            >/etc/apt/sources.list.d/suldr.list
+        apt-get update -qq || true
+    fi
 fi
 
-# ── SANE: prefer ULD's smfp backend, disable xerox_mfp for SCX-3400 ────────
-# The xerox_mfp backend recognises the SCX-3400 USB ID but its sane_read()
-# fails ("Error during device I/O") on M-series Samsung devices. The
-# proprietary smfp backend (shipped by the ULD via /etc/sane.d/dll.d/
-# smfp-scanner) works reliably. We comment out xerox_mfp in dll.conf so
-# scanimage -L / scanservjs only sees the smfp device.
-if [[ -f /etc/sane.d/smfp.conf ]] && grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
-    sed -ri 's/^(\s*)(xerox_mfp\b)/\1# \2/' /etc/sane.d/dll.conf
+# ── SANE quirks + per-device package install (driven by quirks catalogue) ──
+# All per-device fixes live in portal/server/data/device-quirks.json. The
+# helper script enumerates connected USB devices, applies any
+# scan.sane_blacklist entries to /etc/sane.d/dll.conf, and prints the union
+# of apt packages those devices need. Adding a new device fix is a JSON
+# edit — no shell changes required.
+info "Applying device quirks (per portal/server/data/device-quirks.json)"
+QUIRK_PKGS="$("$REPO_DIR/scripts/apply-device-quirks.sh" || true)"
+if [[ -n "$QUIRK_PKGS" ]]; then
+    info "Installing device-specific packages: $(echo "$QUIRK_PKGS" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    apt-get install -y --no-install-recommends $QUIRK_PKGS || \
+        warn "Some quirks packages failed to install — see apt log"
+    # Re-run blacklist now that the preferred backends may be installed.
+    "$REPO_DIR/scripts/apply-device-quirks.sh" >/dev/null || true
 fi
-if [[ ! -f /etc/sane.d/smfp.conf ]]; then
-    # Fallback for hosts without ULD: enable xerox_mfp and add the SCX-3400 ID.
-    if grep -qE '^#\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
-        sed -ri 's/^#\s*(xerox_mfp)\b/\1/' /etc/sane.d/dll.conf
-    elif ! grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
-        echo 'xerox_mfp' >>/etc/sane.d/dll.conf
-    fi
-    if ! grep -q '0x344f' /etc/sane.d/xerox_mfp.conf 2>/dev/null; then
-        info "Adding Samsung SCX-3400 (04e8:344f) to xerox_mfp backend"
-        {
-            echo
-            echo '# printershare: Samsung SCX-3400 Series'
-            echo 'usb 0x04e8 0x344f'
-        } >>/etc/sane.d/xerox_mfp.conf
-    fi
-fi
+
 # saned (network scanner) — bind on all interfaces; nginx fronts it.
 grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
     echo '0.0.0.0/0' >>/etc/sane.d/saned.conf
 
 # ── Auto-add USB printer queue to CUPS ──────────────────────────────────────
 # Discover any USB printer and register it with CUPS if not already present.
-# Uses driverless / IPP-everywhere when possible; falls back to a Samsung
-# generic PPD shipped with the ULD for SCX-series devices.
+# Uses driverless / IPP-everywhere first; on failure, consults the quirks
+# catalogue for a device-specific PPD hint (`print.ppd`, e.g. "suld:..."),
+# resolves it under /usr/share/ppd/, and falls back to a fuzzy filename
+# search keyed by the printer model in the USB URI.
 info "Detecting USB printers"
 sleep 2  # give cups time to enumerate after restart
 PRINTER_URI="$(lpinfo -v 2>/dev/null | awk '/^direct usb:/{print $2; exit}')"
 if [[ -n "$PRINTER_URI" ]] && ! lpstat -p 2>/dev/null | grep -q '^printer .* USB'; then
-    # Try driverless first (works for most modern devices, including SCX).
     PRINTER_NAME="$(echo "$PRINTER_URI" | sed -E 's|.*/([^?]+).*|\1|; s/[^A-Za-z0-9_-]/_/g')"
     info "Adding CUPS queue $PRINTER_NAME → $PRINTER_URI"
+    # 1. Try driverless / IPP-everywhere — works for most modern devices.
     if ! lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -m everywhere 2>/dev/null; then
-        # Fall back to Samsung generic PPD from ULD if everywhere fails.
-        # The apt-installed ULD lands its PPDs in /usr/share/ppd/suld/.
-        PPD="$(find /usr/share/ppd/suld /opt/Samsung/mfp/share/ppd -name '*SCX-3400*' 2>/dev/null | head -1)"
-        [[ -z "$PPD" ]] && PPD="$(find /usr/share/ppd/suld /opt/Samsung/mfp/share/ppd -iname '*samsung*scx*' 2>/dev/null | head -1)"
+        PPD=""
+        # 2. Quirks-catalogue lookup: take the first matched device's
+        #    print.ppd hint and resolve it to a real file.
+        if command -v jq >/dev/null && [[ -r "$REPO_DIR/portal/server/data/device-quirks.json" ]]; then
+            QCAT="$REPO_DIR/portal/server/data/device-quirks.json"
+            while read -r vid pid; do
+                KEY="${vid,,}:${pid,,}"
+                HINT="$(jq -r --arg k "$KEY" --arg v "${vid,,}:*" \
+                    '.devices[$k].print.ppd // .devices[$v].print.ppd // empty' "$QCAT")"
+                [[ -z "$HINT" ]] && continue
+                # Hint formats:
+                #   "suld:Samsung_SCX-3400_Series.ppd.gz"  → /usr/share/ppd/suld/<file>
+                #   "/absolute/path/to/file.ppd"           → use as-is
+                #   "everywhere" / "driverless"            → already tried above
+                case "$HINT" in
+                    /*)         [[ -r "$HINT" ]] && PPD="$HINT" ;;
+                    everywhere|driverless) : ;;
+                    *:*)
+                        sub="${HINT%%:*}"
+                        file="${HINT#*:}"
+                        cand="/usr/share/ppd/$sub/$file"
+                        [[ -r "$cand" ]] && PPD="$cand"
+                        ;;
+                esac
+                [[ -n "$PPD" ]] && break
+            done < <(lsusb | awk 'match($0,/ID ([0-9a-fA-F]{4}):([0-9a-fA-F]{4})/,m){print m[1], m[2]}')
+        fi
+        # 3. Last-ditch: fuzzy search by model name embedded in the USB URI.
+        if [[ -z "$PPD" ]]; then
+            MODEL="$(echo "$PRINTER_URI" | sed -E 's|.*/||; s/[?].*//; s/%20/ /g')"
+            PPD="$(find /usr/share/ppd /opt -iname "*${MODEL// /*}*.ppd*" 2>/dev/null | head -1)"
+        fi
         if [[ -n "$PPD" ]]; then
+            info "Using PPD: $PPD"
             lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD" || \
                 warn "lpadmin failed with PPD $PPD"
         else

@@ -212,7 +212,11 @@ portal/
 ├── server/               Express API (CommonJS)
 │   ├── app.js            Bare Express app (no listen — used by tests)
 │   ├── index.js          Entry point (app.listen)
-│   ├── lib/env.js        .env read/write helpers
+│   ├── data/
+│   │   └── device-quirks.json  Per-device driver / SANE-backend hints
+│   ├── lib/
+│   │   ├── env.js              .env read/write helpers
+│   │   └── device-quirks.js    Quirks catalogue lookup
 │   └── routes/           One file per API resource
 ├── src/                  Vue 3 + TypeScript SPA
 │   ├── components/       Reusable UI components
@@ -227,6 +231,73 @@ portal/
     │   └── stores/       Pinia store tests (vitest + jsdom)
     └── e2e/              Playwright browser tests
 ```
+
+---
+
+## Device quirks catalogue
+
+PrinterShare ships a JSON catalogue of known device-specific fixes at
+[`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json).
+This is the single source of truth for "Brand X model Y needs driver Z and SANE
+backend W disabled" — both the **installer** ([`scripts/proxmox/install.sh`](scripts/proxmox/install.sh))
+and the **setup wizard** (via [`portal/server/lib/device-quirks.js`](portal/server/lib/device-quirks.js))
+consult it. There are **no hardcoded model checks** in shell or JavaScript.
+
+### Catalogue schema
+
+Keys are lowercase `vid:pid` (USB vendor + product IDs) or `vid:*` for a whole
+brand. Lookup falls back from exact → vendor → make string → none.
+
+```jsonc
+{
+  "04e8:344f": {
+    "name":  "Samsung SCX-3400 Series",
+    "make":  "samsung",
+    "kind":  "mfp",                        // printer | scanner | mfp | auto
+    "print": {
+      "ppd":      "suld:Samsung_SCX-3400_Series.ppd.gz",   // resolved as /usr/share/ppd/<sub>/<file>
+      "packages": ["suld-driver2-1.00.39"],                // apt packages to install
+      "uri_hint": "usb://Samsung/SCX-3400%20Series"
+    },
+    "scan": {
+      "sane_backend":   "smfp",            // preferred backend name
+      "sane_blacklist": ["xerox_mfp"],     // backends commented out of /etc/sane.d/dll.conf
+      "packages":       ["suld-driver2-1.00.39"]
+    },
+    "ipp_usb": false,                      // does ipp-usb work?
+    "airsane": "ok",                       // ok | broken | untested
+    "notes":   "Samsung ULD …"             // shown to the user in the wizard
+  }
+}
+```
+
+### Adding a new device
+
+1. Open [`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json),
+   add a new entry keyed by your device's USB VID:PID (find it with `lsusb`).
+2. Commit + push. The next `./scripts/deploy.sh` picks it up.
+3. On the host, reconcile the live system without rebooting:
+
+   ```bash
+   ./scripts/apply-device-quirks.sh        # prints packages to apt-get install
+   curl -X POST http://localhost/api/v1/wizard/apply-quirks   # via the portal
+   ```
+
+The installer also re-runs `apply-device-quirks.sh` on every `git pull` →
+`./scripts/deploy.sh`, so the catalogue is always in sync.
+
+### How the helper script works
+
+[`scripts/apply-device-quirks.sh`](scripts/apply-device-quirks.sh):
+
+1. Enumerates connected USB devices (`lsusb`).
+2. For each VID:PID, finds a matching catalogue entry.
+3. If the preferred SANE backend's conf file is installed, comments out every
+   backend named in `scan.sane_blacklist` inside `/etc/sane.d/dll.conf`.
+4. Prints the union of all `print.packages` + `scan.packages` on stdout so
+   the caller can `apt-get install` them.
+
+The script is idempotent and safe to re-run.
 
 ---
 
@@ -253,6 +324,9 @@ Base path: `/api/v1`
 | `POST`   | `/wizard/state` | Update wizard step |
 | `POST`   | `/wizard/build` | Build and start all services |
 | `POST`   | `/wizard/reset` | Reset wizard state |
+| `GET`    | `/wizard/quirks?vidpid=04e8:344f` | Per-device driver hints (see [Device quirks catalogue](#device-quirks-catalogue)) |
+| `GET`    | `/wizard/driver-check?vidpid=…&make=…` | Driver availability check + quirks lookup |
+| `POST`   | `/wizard/apply-quirks` | Reconcile SANE config against connected USB devices (native mode) |
 | `GET`    | `/logs/:service` | Tail service logs |
 | `GET`    | `/services` | Docker service status |
 | `POST`   | `/services/:name/restart` | Restart a service |

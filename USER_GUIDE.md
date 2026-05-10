@@ -240,6 +240,34 @@ docker compose logs --tail=200 ps-scanservjs
 - Verify printer online state and paper/toner status
 - Power cycle printer and re-test from Portal
 
+### Device-specific driver problems
+
+PrinterShare maintains a per-device fix catalogue at
+[`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json)
+covering known driver gotchas — wrong SANE backend, missing PPDs, ipp-usb
+quirks, etc.
+
+If your device is misbehaving:
+
+1. Plug it in, then check what the catalogue knows about it:
+
+   ```bash
+   curl http://${HOST_IP}/api/v1/wizard/quirks?vidpid=04e8:344f | jq .
+   ```
+
+2. To re-apply the fixes without rebooting (native install only):
+
+   ```bash
+   curl -X POST http://${HOST_IP}/api/v1/wizard/apply-quirks | jq .
+   # or, on the host:
+   ssh root@${HOST_IP} /opt/printershare/scripts/apply-device-quirks.sh
+   ```
+
+3. If your device isn't in the catalogue, add an entry (see the
+   [Device quirks catalogue](README.md#device-quirks-catalogue) section in
+   the README) and submit a pull request — your fix will benefit every
+   other PrinterShare user with the same device.
+
 ## 10. Security checklist
 
 Before production use:
