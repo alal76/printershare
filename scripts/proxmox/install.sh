@@ -308,7 +308,7 @@ systemctl reload nginx
 
 # ── Samba ───────────────────────────────────────────────────────────────────
 info "Configuring Samba (\\\\$SERVER_NAME\\Scans)"
-id "$SAMBA_USER" &>/dev/null || useradd -r -s /usr/sbin/nologin "$SAMBA_USER"
+id "$SAMBA_USER" &>/dev/null || useradd -r -M -N -s /usr/sbin/nologin -g nogroup "$SAMBA_USER"
 printf '%s\n%s\n' "$SAMBA_PASS" "$SAMBA_PASS" | smbpasswd -a -s "$SAMBA_USER" >/dev/null
 if ! grep -q '^\[Scans\]' /etc/samba/smb.conf; then
     cat >>/etc/samba/smb.conf <<SMB
