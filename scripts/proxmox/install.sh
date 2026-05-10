@@ -277,7 +277,11 @@ Wants=avahi-daemon.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/airsaned --listen-port=$AIRSANE_PORT --interface=any --mdns-announce=true --web-interface=true --hotplug=true
+# IMPORTANT: do NOT pass --interface=any. AirSane treats the value as a
+# literal interface name, fails to look it up, returns SANE_STATUS_IO_ERROR,
+# and segfaults during cleanup. Omitting --interface binds to all addresses
+# (0.0.0.0 + ::), which is what we actually want.
+ExecStart=/usr/local/bin/airsaned --listen-port=$AIRSANE_PORT --mdns-announce=true --web-interface=true --hotplug=true
 Restart=on-failure
 RestartSec=3
 # Needs access to /dev/bus/usb (provided by the LXC passthrough block).
@@ -420,17 +424,11 @@ fi
 # ── Enable + (re)start the new units ────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now scanservjs.service
-# NOTE: airsane is intentionally NOT enabled. The Samsung ULD's smfp SANE
-# backend uses libusb in a way that segfaults inside airsaned (it dereferences
-# a freed device handle when libusb_get_device_descriptor races the smfp
-# init). The crash leaves the USB endpoint in a half-claimed state, which
-# also breaks subsequent scanimage calls until a USB reset. scanservjs uses
-# the same backend but spawns scanimage as a subprocess, so the crash (if
-# any) is isolated. Until upstream airsane gains an option to skip smfp or
-# we patch it, we ship without it. Apple AirScan still works via the eSCL
-# proxy in nginx → scanservjs at /escl/ (TODO).
-systemctl disable airsane.service 2>/dev/null || true
-systemctl mask airsane.service 2>/dev/null || true
+# AirSane (eSCL/AirScan bridge) gives macOS / iOS a native scanner via
+# Bonjour. Earlier installs masked it because `--interface=any` made it
+# crash on startup; with that fixed the service is stable on smfp.
+systemctl unmask airsane.service 2>/dev/null || true
+systemctl enable --now airsane.service
 systemctl enable --now printershare-portal.service
 # On re-runs (git pull → rebuild), the units exist and are running but with
 # stale code; force a restart so the new build/config takes effect.
