@@ -1,7 +1,7 @@
 'use strict';
 
 const router   = require('express').Router();
-const { execSync } = require('node:child_process');
+const { execSync, spawnSync } = require('node:child_process');
 const os       = require('node:os');
 const { version: packageVersion } = require('../../package.json');
 
@@ -36,11 +36,62 @@ router.get('/usb', (_req, res) => {
   try {
     const { parseUsbDevices } = require('../services/usb-detect');
     const raw = execSync('lsusb 2>/dev/null', { timeout: 5000 }).toString();
-    const devices = parseUsbDevices(raw);
+
+    // Cross-reference with CUPS (printer source of truth) and SANE (scanners).
+    const cupsPrinterMakes = collectCupsPrinterMakes();
+    const saneUsbDevices   = collectSaneUsbDevices();
+
+    const devices = parseUsbDevices(raw, { cupsPrinterMakes, saneUsbDevices });
     res.json({ devices });
   } catch (err) {
     res.status(500).json({ error: 'USB detection failed', detail: String(err.message) });
   }
 });
+
+/**
+ * Collect manufacturer names from CUPS-detected USB printers.
+ * Parses `lpinfo -v` lines like `direct usb://Samsung/SCX-3400%20Series?...`.
+ * @returns {string[]}
+ */
+function collectCupsPrinterMakes() {
+  try {
+    const r = spawnSync('docker', ['exec', 'ps-cups', 'lpinfo', '-v'], {
+      timeout: 8000, encoding: 'utf8',
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const makes = new Set();
+    const re = /usb:\/\/([^/?\s]+)\//g;
+    let m;
+    while ((m = re.exec(out)) !== null) {
+      makes.add(decodeURIComponent(m[1]).toLowerCase());
+    }
+    return [...makes];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Collect bus/device pairs of USB scanners detected by SANE.
+ * Parses lines like `device `xerox_mfp:libusb:001:002' is a ...`.
+ * @returns {Array<{bus:string, device:string}>}
+ */
+function collectSaneUsbDevices() {
+  try {
+    const r = spawnSync('docker', ['exec', 'ps-scanservjs', 'scanimage', '-L'], {
+      timeout: 8000, encoding: 'utf8',
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const result = [];
+    const re = /libusb:(\d{3}):(\d{3})/g;
+    let m;
+    while ((m = re.exec(out)) !== null) {
+      result.push({ bus: m[1], device: m[2] });
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
 
 module.exports = router;
