@@ -18,6 +18,11 @@ const routes: RouteRecordRaw[] = [
     meta: { plain: true, public: true },
   },
   {
+    path: '/change-password',
+    component: () => import('@/views/ChangePasswordView.vue'),
+    meta: { plain: true, title: 'Change Password' },
+  },
+  {
     path: '/dashboard',
     component: () => import('@/views/DashboardView.vue'),
     meta: { title: 'Dashboard' },
@@ -80,6 +85,10 @@ router.beforeEach(async (to) => {
   }
   if (auth.authenticated && to.path === '/login') {
     return '/dashboard'
+  }
+  // Force password change before any other page.
+  if (auth.authenticated && auth.mustChangePassword && to.path !== '/change-password') {
+    return '/change-password'
   }
   return true
 })

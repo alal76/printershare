@@ -5,8 +5,20 @@ const crypto = require('node:crypto');
 // Auth is ENABLED by default. Set PORTAL_AUTH=false only on isolated LANs.
 const AUTH_ENABLED = String(process.env.PORTAL_AUTH ?? 'true').toLowerCase() === 'true';
 const AUTH_USER = process.env.PORTAL_USER || 'admin';
-const AUTH_PASS = process.env.PORTAL_PASS || process.env.PORTAL_SECRET || 'changeme';
+const DEFAULT_PASS = 'changeme';
+// Runtime-mutable so a change-password call takes effect without a restart.
+let AUTH_PASS = process.env.PORTAL_PASS || process.env.PORTAL_SECRET || DEFAULT_PASS;
 const AUTH_SECRET = process.env.PORTAL_SECRET || 'changeme-portal-secret';
+
+/** Returns true if the password is still the factory default. */
+function isDefaultPassword() {
+  return AUTH_PASS === DEFAULT_PASS;
+}
+
+/** Update the in-process password (call after persisting to .env). */
+function setRuntimePassword(newPass) {
+  AUTH_PASS = newPass;
+}
 const SESSION_TTL_SECONDS = Number.parseInt(process.env.PORTAL_SESSION_TTL || '28800', 10); // 8h
 
 function b64url(input) {
@@ -77,8 +89,10 @@ function verifyCredentials(username, password) {
 module.exports = {
   AUTH_ENABLED,
   AUTH_USER,
-  AUTH_PASS,
+  get AUTH_PASS() { return AUTH_PASS; },
   SESSION_TTL_SECONDS,
+  isDefaultPassword,
+  setRuntimePassword,
   createSessionToken,
   verifySessionToken,
   readSessionToken,

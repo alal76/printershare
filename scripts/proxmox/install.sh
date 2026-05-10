@@ -484,7 +484,7 @@ cat <<EOF
   AirSane     : http://$ip/escl/  (eSCL/AirScan on Bonjour _uscan._tcp)
   Samba share : \\\\$ip\\Scans     (user: $SAMBA_USER / pass: $SAMBA_PASS)
   Portal login: user: $PORTAL_USER_SHOW   pass: $PORTAL_PASS_SHOW
-               (auth ON — change via Settings or edit /etc/printershare/portal.env)
+               (auth ON — you will be prompted to set a new password on first login)
 
   Detected scanners:
 $(scanimage -L 2>/dev/null | sed 's/^/    /' || echo '    (none yet — plug in printer/scanner)')

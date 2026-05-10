@@ -205,7 +205,7 @@ INSTALL COMPLETE  —  ${SERVER_IP}
  Samba share : \\\\${SERVER_IP}\\Scans  (${SAMBA_USER} / ${SAMBA_PASS})
  NFS mount   : ${SERVER_IP}:/srv/printershare/scans
  Portal auth : user=${PORTAL_USER_SHOW}  pass=${PORTAL_PASS_SHOW}
-               (auth enabled — change via Settings or edit ${PORTAL_ENV})
+               (auth enabled — you will be prompted to set a new password on first login)
 
  Optional: bash scripts/setup-rclone.sh
  Optional: sudo bash scripts/install-usbip-server.sh

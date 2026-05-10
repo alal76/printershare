@@ -4,11 +4,14 @@ const router = require('express').Router();
 const {
   AUTH_ENABLED,
   AUTH_USER,
+  isDefaultPassword,
+  setRuntimePassword,
   createSessionToken,
   verifyCredentials,
   readSessionToken,
   verifySessionToken,
 } = require('../lib/auth');
+const { writeEnvPatch, DOTENV_PATH } = require('../lib/env');
 
 // ── Brute-force protection (in-memory sliding window) ────────────────────
 // Max 10 failed attempts per IP in a 15-minute window.
@@ -94,7 +97,27 @@ router.post('/login', (req, res) => {
   clearAttempts(ip);
   const token = createSessionToken(String(username));
   setSessionCookie(res, token);
-  return res.json({ ok: true, authEnabled: true, user: username });
+  return res.json({ ok: true, authEnabled: true, user: username, mustChangePassword: isDefaultPassword() });
+});
+
+router.post('/change-password', (req, res) => {
+  if (!AUTH_ENABLED) return res.json({ ok: true });
+  const payload = verifySessionToken(readSessionToken(req));
+  if (!payload) return res.status(401).json({ error: 'Authentication required' });
+
+  const { currentPassword, newPassword } = req.body || {};
+  if (!verifyCredentials(String(payload.sub), String(currentPassword || ''))) {
+    return res.status(401).json({ error: 'Current password is incorrect' });
+  }
+  const np = String(newPassword || '');
+  if (np.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  }
+  // Persist to .env so it survives restarts.
+  writeEnvPatch({ PORTAL_PASS: np }, DOTENV_PATH);
+  // Apply immediately without requiring a restart.
+  setRuntimePassword(np);
+  return res.json({ ok: true });
 });
 
 router.post('/logout', (_req, res) => {

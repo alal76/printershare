@@ -6,6 +6,7 @@ export const useAuthStore = defineStore('auth', () => {
   const authenticated = ref(false)
   const user = ref('')
   const initialized = ref(false)
+  const mustChangePassword = ref(false)
 
   async function refresh() {
     try {
@@ -47,6 +48,8 @@ export const useAuthStore = defineStore('auth', () => {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string }
       throw new Error(err.error || 'Login failed')
     }
+    const data = await res.json() as { mustChangePassword?: boolean }
+    mustChangePassword.value = Boolean(data.mustChangePassword)
     await refresh()
   }
 
@@ -61,6 +64,7 @@ export const useAuthStore = defineStore('auth', () => {
     authenticated,
     user,
     initialized,
+    mustChangePassword,
     refresh,
     login,
     logout,
