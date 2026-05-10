@@ -137,19 +137,24 @@ systemctl enable --now avahi-daemon
 # proprietary print + scan driver (smfp SANE backend). The open-source
 # xerox_mfp backend fails to scan on M-series devices like the SCX-3400
 # (bulk-IN times out), so we install the ULD for reliable scanning. The
-# repo signs with its own key.
+# keyring ships as suldr-keyring_4_all.deb; download + dpkg -i it first,
+# then the apt repo becomes verifiable.
 info "Installing Samsung Unified Linux Driver (ULD)"
-if [[ ! -f /etc/apt/sources.list.d/suldr.list ]]; then
-    install -d -m 755 /etc/apt/keyrings
-    wget -qO /etc/apt/keyrings/suldr.gpg https://www.bchemnet.com/suldr/suldr-keyring.gpg || \
-        warn "Could not fetch ULD keyring — skipping ULD install"
-    if [[ -s /etc/apt/keyrings/suldr.gpg ]]; then
-        echo "deb [signed-by=/etc/apt/keyrings/suldr.gpg] https://www.bchemnet.com/suldr/ debian extra" \
-            >/etc/apt/sources.list.d/suldr.list
-        apt-get update -qq || true
+if ! dpkg -s suldr-keyring &>/dev/null; then
+    KEYRING_DEB=$(mktemp --suffix=.deb)
+    if wget -qO "$KEYRING_DEB" https://www.bchemnet.com/suldr/pool/debian/extra/su/suldr-keyring_4_all.deb; then
+        dpkg -i "$KEYRING_DEB" || warn "suldr-keyring install failed"
+    else
+        warn "Could not fetch suldr-keyring .deb — skipping ULD install"
     fi
+    rm -f "$KEYRING_DEB"
 fi
-if [[ -f /etc/apt/sources.list.d/suldr.list ]] && ! dpkg -s suld-driver2-1.00.39 &>/dev/null; then
+if dpkg -s suldr-keyring &>/dev/null && [[ ! -f /etc/apt/sources.list.d/suldr.list ]]; then
+    echo "deb https://www.bchemnet.com/suldr/ debian extra" \
+        >/etc/apt/sources.list.d/suldr.list
+    apt-get update -qq || true
+fi
+if dpkg -s suldr-keyring &>/dev/null && ! dpkg -s suld-driver2-1.00.39 &>/dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq suld-driver2-1.00.39 || \
         warn "ULD package install failed — scanner may not work"
 fi
