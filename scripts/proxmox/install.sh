@@ -132,9 +132,33 @@ systemctl restart cups
 # ── Avahi (mDNS/Bonjour for printer + share discovery) ──────────────────────
 systemctl enable --now avahi-daemon
 
+# ── Samsung Unified Linux Driver (ULD) ──────────────────────────────────────
+# The community Debian repo at bchemnet.com/suldr packages Samsung's
+# proprietary print + scan driver (smfp SANE backend). The open-source
+# xerox_mfp backend fails to scan on M-series devices like the SCX-3400
+# (bulk-IN times out), so we install the ULD for reliable scanning. The
+# repo signs with its own key.
+info "Installing Samsung Unified Linux Driver (ULD)"
+if [[ ! -f /etc/apt/sources.list.d/suldr.list ]]; then
+    install -d -m 755 /etc/apt/keyrings
+    wget -qO /etc/apt/keyrings/suldr.gpg https://www.bchemnet.com/suldr/suldr-keyring.gpg || \
+        warn "Could not fetch ULD keyring — skipping ULD install"
+    if [[ -s /etc/apt/keyrings/suldr.gpg ]]; then
+        echo "deb [signed-by=/etc/apt/keyrings/suldr.gpg] https://www.bchemnet.com/suldr/ debian extra" \
+            >/etc/apt/sources.list.d/suldr.list
+        apt-get update -qq || true
+    fi
+fi
+if [[ -f /etc/apt/sources.list.d/suldr.list ]] && ! dpkg -s suld-driver2-1.00.39 &>/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq suld-driver2-1.00.39 || \
+        warn "ULD package install failed — scanner may not work"
+fi
+
 # ── SANE: append Samsung SCX-3400 USB ID if missing ─────────────────────────
 # Enable the xerox_mfp backend in dll.conf (Debian ships it commented out
 # on some installs). Without this, scanimage -L returns "no scanners".
+# Note: ULD installs the smfp backend; we keep xerox_mfp enabled as a
+# fallback for other Samsung devices that may be plugged in later.
 if grep -qE '^#\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
     sed -ri 's/^#\s*(xerox_mfp)\b/\1/' /etc/sane.d/dll.conf
 elif ! grep -qE '^\s*xerox_mfp\b' /etc/sane.d/dll.conf 2>/dev/null; then
@@ -151,6 +175,32 @@ fi
 # saned (network scanner) — bind on all interfaces; nginx fronts it.
 grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
     echo '0.0.0.0/0' >>/etc/sane.d/saned.conf
+
+# ── Auto-add USB printer queue to CUPS ──────────────────────────────────────
+# Discover any USB printer and register it with CUPS if not already present.
+# Uses driverless / IPP-everywhere when possible; falls back to a Samsung
+# generic PPD shipped with the ULD for SCX-series devices.
+info "Detecting USB printers"
+sleep 2  # give cups time to enumerate after restart
+PRINTER_URI="$(lpinfo -v 2>/dev/null | awk '/^direct usb:/{print $2; exit}')"
+if [[ -n "$PRINTER_URI" ]] && ! lpstat -p 2>/dev/null | grep -q '^printer .* USB'; then
+    # Try driverless first (works for most modern devices, including SCX).
+    PRINTER_NAME="$(echo "$PRINTER_URI" | sed -E 's|.*/([^?]+).*|\1|; s/[^A-Za-z0-9_-]/_/g')"
+    info "Adding CUPS queue $PRINTER_NAME → $PRINTER_URI"
+    if ! lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -m everywhere 2>/dev/null; then
+        # Fall back to Samsung generic PPD from ULD if everywhere fails.
+        PPD="$(find /opt/Samsung/mfp/share/ppd /usr/share/ppd -name '*SCX-3400*' 2>/dev/null | head -1)"
+        [[ -z "$PPD" ]] && PPD="$(find /opt/Samsung/mfp/share/ppd /usr/share/ppd -iname '*samsung*scx*' 2>/dev/null | head -1)"
+        if [[ -n "$PPD" ]]; then
+            lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD" || \
+                warn "lpadmin failed with PPD $PPD"
+        else
+            warn "No PPD found for $PRINTER_URI — printer queue not created"
+        fi
+    fi
+    cupsenable "$PRINTER_NAME" 2>/dev/null || true
+    cupsaccept "$PRINTER_NAME" 2>/dev/null || true
+fi
 
 # ── Scanservjs ──────────────────────────────────────────────────────────────
 # Upstream restructured the repo (app-server/ + app-ui/ instead of server/)
