@@ -141,15 +141,17 @@ async function startScan() {
     const mode   = modeMap[opts.value.color]   ?? 'Color'
     const source = sourceMap[opts.value.source] ?? 'Flatbed'
 
-    // Pick a pipeline name matching the chosen format.  The portal-side
-    // /api/v1/scans/run endpoint will fall back to the device's default
-    // pipeline if this one isn't recognised.
+    // Pick a pipeline name matching the chosen format. These names must
+    // match the device's settings.pipeline.options list returned by
+    // scanservjs /api/v1/context — scanservjs rejects any other value
+    // with HTTP 500. The portal-side /api/v1/scans/run endpoint will
+    // fall back to the device's default pipeline if `pipeline` is empty.
     const fmt = opts.value.format
     const pipelineByFormat: Record<string, string> = {
-      pdf:  'PDF (Searchable, high-quality)',
+      pdf:  'PDF (JPG | @:pipeline.high-quality)',
       jpg:  'JPG | @:pipeline.high-quality',
-      png:  'PNG | @:pipeline.high-quality',
-      tiff: 'TIF | @:pipeline.high-quality',
+      png:  'PNG',
+      tiff: 'TIF | @:pipeline.uncompressed',
     }
     const pipeline = pipelineByFormat[fmt]
 
