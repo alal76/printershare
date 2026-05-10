@@ -351,7 +351,9 @@ router.post('/printer/auto-add', (req, res) => {
     : suggestPrinterName(found.make, found.model);
 
   try {
-    runCups(['lpadmin', '-p', printerName, '-E', '-v', found.uri], 30_000);
+    runCups(['lpadmin', '-p', printerName, '-E', '-v', found.uri,
+             '-o', 'printer-is-shared=true'], 30_000);
+    runCups(['cupsctl', '--share-printers'], 5_000);
     runCups(['lpadmin', '-d', printerName], 5_000);
     res.json({ ok: true, name: printerName, uri: found.uri, make: found.make, model: found.model });
   } catch (err) {
