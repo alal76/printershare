@@ -34,7 +34,11 @@ git pull --ff-only
 echo "==> Building portal assets..."
 (cd portal && npm ci --silent && npm run build && rm -rf public && cp -r dist public)
 
-if command -v docker &>/dev/null; then
+if systemctl list-unit-files printershare-portal.service &>/dev/null && \
+   systemctl list-unit-files printershare-portal.service | grep -q printershare-portal; then
+  echo "==> Native (no Docker): restarting printershare-portal service..."
+  systemctl restart printershare-portal
+else
   if [[ "${BUILD}" == "true" ]]; then
     echo "==> Building Docker images..."
     docker compose --env-file "${ENV_FILE}" build --parallel
@@ -48,9 +52,6 @@ if command -v docker &>/dev/null; then
   # so containers that bind-mount them must be restarted to see the change.
   echo "==> Restarting containers with bind-mounted config files..."
   docker compose --env-file "${ENV_FILE}" restart nginx >/dev/null 2>&1 || true
-else
-  echo "==> Native (no Docker): restarting printershare-portal service..."
-  systemctl restart printershare-portal
 fi
 
 echo "==> Waiting for health check..."
