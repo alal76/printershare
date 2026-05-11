@@ -5,7 +5,7 @@ const router = require('express').Router();
 const { spawnSync } = require('node:child_process');
 const fs   = require('node:fs');
 const os   = require('node:os');
-const { restartService, SERVICE_MAP, isNative } = require('../lib/deployment');
+const { startService, stopService, restartService, SERVICE_MAP, isNative } = require('../lib/deployment');
 
 const ALLOWED_SERVICES = new Set(Object.keys(SERVICE_MAP));
 
@@ -166,19 +166,25 @@ function installRclone() {
   }
 }
 
-// ── Service restart ──────────────────────────────────────────────────────────
+// ── Service lifecycle ───────────────────────────────────────────────────────
 
-// POST /api/v1/services/:name/restart
-router.post('/:name/restart', (req, res) => {
+function serviceAction(action, req, res) {
   const { name } = req.params;
   if (!ALLOWED_SERVICES.has(name)) {
     return res.status(400).json({ error: 'Unknown service' });
   }
-  const result = restartService(name);
+  const result = action(name);
   if (!result.ok) {
-    return res.status(500).json({ error: result.message || 'Restart failed' });
+    return res.status(500).json({ error: result.message || `${action.name} failed` });
   }
   res.json({ ok: true });
-});
+}
+
+// POST /api/v1/services/:name/start
+router.post('/:name/start',   (req, res) => serviceAction(startService,   req, res));
+// POST /api/v1/services/:name/stop
+router.post('/:name/stop',    (req, res) => serviceAction(stopService,    req, res));
+// POST /api/v1/services/:name/restart
+router.post('/:name/restart', (req, res) => serviceAction(restartService, req, res));
 
 module.exports = router;

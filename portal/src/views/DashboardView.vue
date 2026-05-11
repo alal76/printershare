@@ -68,26 +68,66 @@
             v-show="svc.status !== 'disabled'"
             :key="name"
             :data-testid="`service-${name}`"
-            class="bg-white rounded-2xl border p-4 flex items-center gap-3 transition-colors"
+            class="bg-white rounded-2xl border p-3 flex flex-col gap-2 transition-colors"
             :class="svc.status === 'ok' ? 'border-green-100' : svc.status === 'error' ? 'border-red-100' : 'border-gray-100'"
           >
-            <div
-              class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-              :class="statusBg(svc.status)"
-            >
-              <component
-                :is="serviceIcon(String(name))"
-                class="w-4 h-4"
-                :class="statusColor(svc.status)"
-              />
+            <!-- top row: icon + name + status -->
+            <div class="flex items-center gap-2.5">
+              <div
+                class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                :class="statusBg(svc.status)"
+              >
+                <component
+                  :is="serviceIcon(String(name))"
+                  class="w-3.5 h-3.5"
+                  :class="statusColor(svc.status)"
+                />
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-semibold text-gray-800 capitalize truncate">
+                  {{ name }}
+                </p>
+                <p class="text-xs text-gray-400 truncate">
+                  {{ svc.message || svc.status }}
+                </p>
+              </div>
             </div>
-            <div class="flex-1 min-w-0">
-              <p class="text-xs font-semibold text-gray-800 capitalize truncate">
-                {{ name }}
-              </p>
-              <p class="text-xs text-gray-400 truncate">
-                {{ svc.message || svc.status }}
-              </p>
+            <!-- bottom row: restart + toggle -->
+            <div class="flex items-center gap-1.5 pt-0.5 border-t border-gray-50">
+              <button
+                type="button"
+                title="Restart"
+                class="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                :disabled="!!acting[String(name)] || svc.status === 'offline' || svc.status === 'error'"
+                @click="svcAction(String(name), 'restart')"
+              >
+                <RotateCcwIcon
+                  class="w-3 h-3"
+                  :class="acting[String(name)] === 'restart' ? 'animate-spin' : ''"
+                />
+                Restart
+              </button>
+              <div class="w-px h-4 bg-gray-100"></div>
+              <button
+                type="button"
+                :title="svc.status === 'ok' ? 'Stop service' : 'Start service'"
+                class="flex-1 flex items-center justify-center gap-1 py-1 rounded-lg text-xs transition-colors disabled:opacity-40"
+                :class="svc.status === 'ok'
+                  ? 'text-green-600 hover:bg-red-50 hover:text-red-500'
+                  : 'text-gray-400 hover:bg-green-50 hover:text-green-600'"
+                :disabled="!!acting[String(name)]"
+                @click="svcAction(String(name), svc.status === 'ok' ? 'stop' : 'start')"
+              >
+                <Loader2Icon
+                  v-if="acting[String(name)] === 'start' || acting[String(name)] === 'stop'"
+                  class="w-3 h-3 animate-spin"
+                />
+                <PowerIcon
+                  v-else
+                  class="w-3 h-3"
+                />
+                {{ svc.status === 'ok' ? 'Stop' : 'Start' }}
+              </button>
             </div>
           </div>
         </template>
@@ -324,6 +364,7 @@ import {
   ScanIcon, PrinterIcon, UsbIcon, ShareIcon,
   CheckCircleIcon, AlertCircleIcon, PrinterIcon as PrintIcon,
   FileTextIcon, DatabaseIcon, WifiIcon, ShieldIcon, Settings2Icon,
+  RotateCcwIcon, PowerIcon, Loader2Icon,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import AppShell   from '@/components/layout/AppShell.vue'
@@ -349,6 +390,30 @@ const jobsApi = useApi<JobsSnapshot>()
 const jobs = ref<JobsSnapshot | null>(null)
 let jobsTimer: ReturnType<typeof setInterval> | null = null
 let deviceTimer: ReturnType<typeof setInterval> | null = null
+
+// service action state: maps service name → current action in flight
+const acting = ref<Record<string, string>>({})
+
+async function svcAction(name: string, action: 'start' | 'stop' | 'restart') {
+  acting.value = { ...acting.value, [name]: action }
+  try {
+    const r = await fetch(`/api/v1/services/${name}/${action}`, { method: 'POST' })
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: `${action} failed` })) as { error?: string }
+      throw new Error(err.error ?? `${action} failed`)
+    }
+    // Refresh health after a short delay so systemd has time to update state
+    setTimeout(() => system.fetchHealth(), 1200)
+  } catch (err) {
+    // Surface error by refreshing health (status will flip to error/offline)
+    await system.fetchHealth()
+    console.warn(`svcAction ${action} ${name}:`, err)
+  } finally {
+    const next = { ...acting.value }
+    delete next[name]
+    acting.value = next
+  }
+}
 
 async function refreshJobs() {
   try {

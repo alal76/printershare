@@ -170,24 +170,24 @@ function serviceConfigured(name) {
 }
 
 /**
- * Restart a logical service.
+ * Run a systemctl / docker-compose action ('start'|'stop'|'restart') on a service.
+ * @param {'start'|'stop'|'restart'} action
  * @param {string} name
  * @param {number} [timeout=30000]
  * @returns {{ ok: boolean, message?: string }}
  */
-function restartService(name, timeout = 30_000) {
+function _serviceAction(action, name, timeout = 30_000) {
   const entry = SERVICE_MAP[name];
   if (!entry) return { ok: false, message: `Unknown service: ${name}` };
-
   if (isNative()) {
     if (!entry.unit) return { ok: false, message: `${name} has no native unit` };
-    const r = spawnSync('systemctl', ['restart', entry.unit], { encoding: 'utf8', timeout });
+    const r = spawnSync('systemctl', [action, entry.unit], { encoding: 'utf8', timeout });
     if (r.status !== 0) return { ok: false, message: (r.stderr || `exit ${r.status}`).slice(0, 400) };
     return { ok: true };
   }
   if (!entry.compose) return { ok: false, message: `${name} has no compose key` };
   const composeFile = process.env.COMPOSE_FILE || '/config/docker-compose.yml';
-  const r = spawnSync('docker', ['compose', '-f', composeFile, 'restart', entry.compose], {
+  const r = spawnSync('docker', ['compose', '-f', composeFile, action, entry.compose], {
     encoding: 'utf8', timeout,
   });
   if (r.status !== 0) {
@@ -195,6 +195,13 @@ function restartService(name, timeout = 30_000) {
   }
   return { ok: true };
 }
+
+/** @param {string} name  @param {number} [timeout] */
+function startService(name, timeout = 30_000)   { return _serviceAction('start',   name, timeout); }
+/** @param {string} name  @param {number} [timeout] */
+function stopService(name, timeout = 30_000)    { return _serviceAction('stop',    name, timeout); }
+/** @param {string} name  @param {number} [timeout] */
+function restartService(name, timeout = 30_000) { return _serviceAction('restart', name, timeout); }
 
 /**
  * Spawn a long-running log streamer for a service. Returns the
@@ -229,6 +236,8 @@ module.exports = {
   runScanSync,
   serviceRunning,
   serviceConfigured,
+  startService,
+  stopService,
   restartService,
   streamLogs,
 };
