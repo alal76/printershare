@@ -39,5 +39,10 @@ export const usePrintStore = defineStore('print', () => {
     }
   }
 
-  return { jobs, printerState, isLoading, fetchQueue, printFile }
+  async function cancelJob(id: string) {
+    await fetch(`/api/v1/printer/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    jobs.value = jobs.value.filter(j => j.id !== id)
+  }
+
+  return { jobs, printerState, isLoading, fetchQueue, printFile, cancelJob }
 })

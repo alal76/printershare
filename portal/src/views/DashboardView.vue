@@ -29,7 +29,9 @@
       <div
         v-for="stat in stats"
         :key="stat.label"
-        class="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col gap-1"
+        class="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col gap-1 transition-shadow"
+        :class="stat.onClick ? 'cursor-pointer hover:shadow-sm hover:border-gray-200' : ''"
+        @click="stat.onClick?.()"
       >
         <div class="flex items-center justify-between">
           <span class="text-xs text-gray-500">{{ stat.label }}</span>
@@ -356,6 +358,106 @@
       </Card>
     </section>
   </AppShell>
+
+  <!-- ── Scan Files modal ────────────────────────────────────────────── -->
+  <Modal
+    v-model="showScans"
+    title="Scan Files"
+  >
+    <FileList :max="200" />
+  </Modal>
+
+  <!-- ── Print Queue modal ──────────────────────────────────────────── -->
+  <Modal
+    v-model="showQueue"
+    title="Print Queue"
+  >
+    <div
+      v-if="print.jobs.length === 0"
+      class="text-sm text-gray-400 text-center py-8"
+    >
+      No jobs in queue
+    </div>
+    <div
+      v-else
+      class="divide-y divide-gray-100"
+    >
+      <div
+        v-for="job in print.jobs"
+        :key="job.id"
+        class="flex items-center gap-3 py-3"
+      >
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">
+            {{ job.name }}
+          </p>
+          <p class="text-xs text-gray-400">
+            {{ job.state }} · {{ job.created }}
+          </p>
+        </div>
+        <button
+          type="button"
+          class="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40"
+          :title="`Cancel ${job.name}`"
+          :disabled="cancelingJob === job.id"
+          @click="cancelPrintJob(job.id)"
+        >
+          <Loader2Icon
+            v-if="cancelingJob === job.id"
+            class="w-4 h-4 animate-spin"
+          />
+          <CircleXIcon
+            v-else
+            class="w-4 h-4"
+          />
+        </button>
+      </div>
+    </div>
+    <template #footer>
+      <button
+        v-if="print.jobs.length > 0"
+        type="button"
+        class="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-40"
+        :disabled="!!cancelingJob"
+        @click="cancelAllJobs"
+      >
+        Cancel All
+      </button>
+    </template>
+  </Modal>
+
+  <!-- ── Service Errors modal ───────────────────────────────────────── -->
+  <Modal
+    v-model="showErrors"
+    title="Service Errors"
+  >
+    <div
+      v-if="errorServices.length === 0"
+      class="text-sm text-gray-400 text-center py-8"
+    >
+      No errors detected
+    </div>
+    <div
+      v-else
+      class="space-y-3"
+    >
+      <div
+        v-for="svc in errorServices"
+        :key="svc.name"
+        class="flex items-start gap-3 p-3 rounded-xl border border-red-100 bg-red-50"
+      >
+        <AlertCircleIcon class="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+        <div>
+          <p class="text-sm font-semibold text-gray-900 capitalize">
+            {{ svc.name }}
+          </p>
+          <p class="text-xs text-gray-500 mt-0.5">
+            {{ svc.message || svc.status }}
+          </p>
+        </div>
+      </div>
+    </div>
+  </Modal>
 </template>
 
 <script setup lang="ts">
@@ -364,12 +466,13 @@ import {
   ScanIcon, PrinterIcon, UsbIcon, ShareIcon,
   CheckCircleIcon, AlertCircleIcon, PrinterIcon as PrintIcon,
   FileTextIcon, DatabaseIcon, WifiIcon, ShieldIcon, Settings2Icon,
-  RotateCcwIcon, PowerIcon, Loader2Icon,
+  RotateCcwIcon, PowerIcon, Loader2Icon, CircleXIcon,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import AppShell   from '@/components/layout/AppShell.vue'
 import Button     from '@/components/ui/Button.vue'
 import Card       from '@/components/ui/Card.vue'
+import Modal      from '@/components/ui/Modal.vue'
 import FileList   from '@/components/scan/FileList.vue'
 import { useSystemStore } from '@/stores/system'
 import { useScanStore }   from '@/stores/scan'
@@ -393,6 +496,34 @@ let deviceTimer: ReturnType<typeof setInterval> | null = null
 
 // service action state: maps service name → current action in flight
 const acting = ref<Record<string, string>>({})
+
+// ── Drilldown modals ──────────────────────────────────────────────────────
+const showScans  = ref(false)
+const showQueue  = ref(false)
+const showErrors = ref(false)
+const cancelingJob = ref<string | null>(null)
+
+async function cancelPrintJob(id: string) {
+  cancelingJob.value = id
+  try {
+    await print.cancelJob(id)
+  } finally {
+    cancelingJob.value = null
+  }
+}
+
+async function cancelAllJobs() {
+  for (const job of print.jobs) {
+    await cancelPrintJob(job.id)
+  }
+}
+
+const errorServices = computed(() => {
+  if (!system.health) return []
+  return Object.entries(system.health.services)
+    .filter(([, s]) => s.status === 'error' || s.status === 'offline')
+    .map(([name, s]) => ({ name, status: s.status, message: s.message }))
+})
 
 async function svcAction(name: string, action: 'start' | 'stop' | 'restart') {
   acting.value = { ...acting.value, [name]: action }
@@ -496,6 +627,7 @@ const stats = computed(() => [
     icon:  CheckCircleIcon,
     bg:    'bg-green-50',
     color: 'text-green-600',
+    onClick: undefined as (() => void) | undefined,
   },
   {
     label: 'Scan Files',
@@ -505,6 +637,7 @@ const stats = computed(() => [
     icon:  ScanIcon,
     bg:    'bg-blue-50',
     color: 'text-blue-600',
+    onClick: () => { showScans.value = true },
   },
   {
     label: 'Print Queue',
@@ -514,6 +647,7 @@ const stats = computed(() => [
     icon:  PrinterIcon,
     bg:    'bg-purple-50',
     color: 'text-purple-600',
+    onClick: () => { showQueue.value = true },
   },
   {
     label: 'Errors',
@@ -523,6 +657,7 @@ const stats = computed(() => [
     icon:  AlertCircleIcon,
     bg:    'bg-red-50',
     color: 'text-red-500',
+    onClick: () => { showErrors.value = true },
   },
 ])
 

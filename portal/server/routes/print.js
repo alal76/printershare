@@ -123,4 +123,19 @@ router.post('/print', upload.single('file'), async (req, res) => {
   }
 });
 
+// DELETE /api/v1/printer/jobs/:id  — cancel a CUPS print job
+router.delete('/jobs/:id', (req, res) => {
+  const { id } = req.params;
+  // id must be in the form "printername-123" — reject anything else to prevent injection
+  if (!/^[\w.-]+-\d+$/.test(id)) {
+    return res.status(400).json({ error: 'Invalid job ID' });
+  }
+  try {
+    run('cancel', [id], 5_000);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 400) });
+  }
+});
+
 module.exports = router;
