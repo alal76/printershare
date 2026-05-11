@@ -65,7 +65,7 @@ export const useSystemStore = defineStore('system', () => {
     }
   }
 
-  function startPolling(intervalMs = 30_000) {
+  function startPolling(intervalMs = 10_000) {
     fetchHealth()
     if (pollInterval.value) clearInterval(pollInterval.value)
     pollInterval.value = setInterval(fetchHealth, intervalMs)

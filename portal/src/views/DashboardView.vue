@@ -347,12 +347,20 @@ const devices = useDevicesStore()
 const jobsApi = useApi<JobsSnapshot>()
 const jobs = ref<JobsSnapshot | null>(null)
 let jobsTimer: ReturnType<typeof setInterval> | null = null
+let deviceTimer: ReturnType<typeof setInterval> | null = null
 
 async function refreshJobs() {
   try {
     const data = await jobsApi.call('/api/v1/jobs', { silent: true })
     if (data) jobs.value = data
   } catch { /* ignore — surfaced via service health */ }
+}
+
+async function refreshDevicesAndPrinter() {
+  await Promise.all([
+    devices.fetchDevices(),
+    print.fetchQueue(),
+  ])
 }
 
 const systemInfo = computed(() => {
@@ -376,11 +384,13 @@ onMounted(async () => {
     devices.fetchDevices(),
     refreshJobs(),
   ])
-  jobsTimer = setInterval(refreshJobs, 5000)
+  jobsTimer   = setInterval(refreshJobs, 5_000)
+  deviceTimer = setInterval(refreshDevicesAndPrinter, 30_000)
 })
 onUnmounted(() => {
   system.stopPolling()
-  if (jobsTimer) clearInterval(jobsTimer)
+  if (jobsTimer)   clearInterval(jobsTimer)
+  if (deviceTimer) clearInterval(deviceTimer)
 })
 
 const uptimeLabel = computed(() => {

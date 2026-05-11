@@ -71,10 +71,10 @@ function _refreshTailscaleCache() {
   }
 }
 
-// Kick off immediately then refresh every 60 s; .unref() keeps it from
+// Kick off immediately then refresh every 15 s; .unref() keeps it from
 // blocking a clean process exit.
 _refreshTailscaleCache();
-setInterval(_refreshTailscaleCache, 60_000).unref();
+setInterval(_refreshTailscaleCache, 15_000).unref();
 
 /**
  * Check whether the Tailscale daemon inside ps-tailscale is connected.
