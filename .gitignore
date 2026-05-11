@@ -15,3 +15,10 @@ portal/test-results/
 # macOS
 .DS_Store
 
+# AI assistant files (Copilot / Claude design docs — not part of the shipped product)
+.github/copilot-instructions.md
+SPECS.md
+SPECS.md.bak
+SPECS-UX-ARCH.md
+REVIEW.md
+

@@ -4,9 +4,9 @@ Thank you for helping make PrinterShare work with more printers and scanners.
 
 ## The easiest contribution: adding a device
 
-The single most useful contribution is adding a new entry to the
+The single most useful contribution is adding an entry to the
 [device quirks catalogue](portal/server/data/device-quirks.json).
-No Node.js or Vue knowledge required — it's just a JSON file.
+No Node.js or Vue knowledge required — it's a JSON file.
 
 ### 1. Find your device's USB VID:PID
 
@@ -14,108 +14,132 @@ On Linux / the PrinterShare host:
 
 ```bash
 lsusb | grep -i <your printer brand>
-# e.g.  Bus 001 Device 003: ID 04e8:344f Samsung Electronics Co., Ltd SCX-3400 Series
-#                                ^^^^ ^^^^
-#                                VID  PID
+# Example output: Bus 001 Device 003: ID 04e8:344f Samsung Electronics Co., Ltd SCX-3400
+# VID:PID = 04e8:344f
 ```
 
-### 2. Check if there's already an entry
+### 2. Add a catalogue entry
 
-```bash
-cat portal/server/data/device-quirks.json | python3 -m json.tool | grep -A5 '"04e8:344f"'
-```
-
-### 3. Add (or edit) the entry
-
-Keys are lowercase `vid:pid` (exact match) or `vid:*` (vendor wildcard).
-Copy an existing entry as a template and fill in what applies to your device.
+Open `portal/server/data/device-quirks.json` and add an entry:
 
 ```jsonc
-"04e8:344f": {
-  "name":  "Samsung SCX-3400 Series",
-  "make":  "Samsung",
-  "kind":  "mfp",            // mfp | printer | scanner
-  "print": {
-    "ppd":      "suld:Samsung_SCX-3400_Series.ppd.gz",
-    "packages": ["suld-driver2-1.00.39"],
-    "uri_hint": "usb"
-  },
-  "scan": {
-    "sane_backend": "smfp",
-    "sane_blacklist": ["xerox_mfp"],
-    "packages": []
-  },
-  "ipp_usb":  false,         // true if the device speaks IPP-over-USB
-  "airsane":  false,         // true if AirSane (eSCL) works
-  "notes":    "Requires Samsung ULD (suldr repo). xerox_mfp conflicts."
+{
+  "04e8:344f": {
+    "name":  "Samsung SCX-3400 Series",
+    "make":  "samsung",
+    "kind":  "mfp",           // printer | scanner | mfp | auto
+    "print": {
+      "ppd":      "suld:Samsung_SCX-3400_Series.ppd.gz",
+      "packages": ["suld-driver2-1.00.39"],
+      "uri_hint": "usb://Samsung/SCX-3400%20Series"
+    },
+    "scan": {
+      "sane_backend":   "smfp",
+      "sane_blacklist": ["xerox_mfp"],
+      "packages":       ["suld-driver2-1.00.39"]
+    },
+    "ipp_usb": false,
+    "airsane": "ok",
+    "notes":   "Requires Samsung ULD driver. ipp-usb does not work with this model."
+  }
 }
 ```
 
-Schema fields you can omit if they don't apply: `print`, `scan`, `ipp_usb`, `airsane`, `notes`.
+Fields:
+| Field | Required | Description |
+|---|---|---|
+| `name` | yes | Human-readable device name |
+| `make` | yes | Manufacturer lowercase (used for driver search) |
+| `kind` | yes | `printer`, `scanner`, `mfp`, or `auto` |
+| `print.ppd` | no | PPD path — `suld:<file>`, `hplip:<file>`, or a full path |
+| `print.packages` | no | apt packages to install for printing |
+| `print.uri_hint` | no | Preferred CUPS URI fragment |
+| `scan.sane_backend` | no | Preferred SANE backend name |
+| `scan.sane_blacklist` | no | Backends to disable in `dll.conf` |
+| `scan.packages` | no | apt packages to install for scanning |
+| `ipp_usb` | no | `true` / `false` — whether ipp-usb works with this device |
+| `airsane` | no | `ok`, `broken`, or `untested` |
+| `notes` | no | Free-text notes shown to the user in the wizard |
 
-### 4. Validate the entry
+### 3. Test your entry
 
 ```bash
 cd portal
-npm test -- --reporter=verbose --grep "device-quirks"
+npm test                       # must pass all 56 tests
 ```
 
-All 8 quirks unit tests must still pass, plus any new tests you add for your entry.
-
-### 5. Test on real hardware (if possible)
-
-Run the apply script in dry-run mode on the target host:
-
+Check the wizard shows the right suggestions:
 ```bash
-APPLY_BLACKLIST=0 /opt/printershare/scripts/apply-device-quirks.sh
+curl "http://localhost:3000/api/v1/wizard/quirks?vidpid=04e8:344f" | python3 -m json.tool
 ```
 
-It should print `matched <vid:pid> → <name>` for your device.
+### 4. Open a pull request
 
-### 6. Open a pull request
-
-- Title: `feat(quirks): add <make> <model>`
-- Include the lsusb output for your device in the PR description
-- If you tested on real hardware, say so and describe what works
+Commit with `chore(quirks): add <brand> <model>` and open a PR.
+Your fix will benefit every other PrinterShare user with the same device.
 
 ---
 
-## Code contributions
-
-### Setup
+## Development setup
 
 ```bash
 git clone https://github.com/alal76/printershare.git
 cd printershare/portal
 npm install
-npm run dev        # starts Vite dev server + Express API
+npm run dev        # starts Vite dev server + Express API with hot reload
 ```
 
-### Rules (enforced by CI)
+### Validation before committing
 
 ```bash
-npm run lint       # 0 errors, 0 warnings
-npm run type-check # strict TypeScript — no any, no @ts-ignore without comment
-npm test           # all unit tests must pass (≥ 52)
+cd portal
+npm run lint        # must be 0 errors, 0 warnings
+npm run type-check  # TypeScript strict check — must exit 0
+npm test            # must pass all 56 tests
 ```
 
-### Key constraints
+All three must pass before a PR will be accepted.
 
-- **No hardcoded device logic.** All per-device fixes belong in `portal/server/data/device-quirks.json`.
-  See [copilot-instructions.md](.github/copilot-instructions.md) section 3a.
-- **No `v-html`** in Vue components. Use `SafeStepText.vue` or structure data instead.
-- **All `/api/v1/*` routes** (except `/auth/*` and `/health`) must go through `authMiddleware`.
-- **Shell commands** must use `spawn(cmd, [args])` — never string interpolation.
-- **New npm packages** must be pinned to an exact version (`--save-exact`).
-
-### Commit format
+### Test structure
 
 ```
-type(scope): description
-
-feat(quirks): add Brother HL-L2350DW entry
-fix(scan):    coerce mode list to lowercase before dedup
-docs(readme): add HTTPS hardening section
+portal/tests/
+├── unit/
+│   ├── server/   Express route tests (supertest + vitest)
+│   └── stores/   Pinia store tests (vitest + jsdom)
+└── e2e/          Playwright browser tests
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`.
+Run only server unit tests:
+```bash
+npm run test:server
+```
+
+Run only client/store tests:
+```bash
+npm run test:client
+```
+
+---
+
+## Code conventions
+
+- **TypeScript strict** — no `any`, no `@ts-ignore` without explanation
+- **No `v-html`** in Vue components
+- **Shell commands** use `spawn(cmd, [args])` — never string interpolation
+- **New API routes** must go through `authMiddleware` unless explicitly public
+- **New settings keys** must be added to `ALLOWED_SETTINGS` in `portal/server/routes/settings.js` before adding to the UI
+- Commits follow **`type(scope): description`** — e.g. `fix(scan): handle empty page list`
+
+---
+
+## Reporting bugs
+
+Open a [GitHub issue](https://github.com/alal76/printershare/issues) with:
+- PrinterShare version (`cat /opt/printershare/VERSION`)
+- OS and install type (native LXC / Docker)
+- Printer/scanner model and USB VID:PID (`lsusb`)
+- Steps to reproduce
+- Relevant log lines (`journalctl -u printershare-portal -n 50`)
+
+For security vulnerabilities see [SECURITY.md](SECURITY.md).

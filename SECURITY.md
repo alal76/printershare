@@ -3,49 +3,60 @@
 ## Supported Versions
 
 Only the latest commit on `main` receives security fixes.
-Pin to a specific commit SHA for production deployments.
 
 ## Reporting a Vulnerability
 
-Please **do not** open a public GitHub issue for security vulnerabilities.
+**Do not** open a public GitHub issue for security vulnerabilities.
 
-Instead, e-mail the maintainers at the address listed in the repository profile,
-or open a [GitHub private security advisory](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability)
-for this repository.
+Instead, open a [GitHub private security advisory](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability)
+or e-mail the maintainer listed in the repository profile.
 
 Include:
-
 - A clear description of the vulnerability
 - Steps to reproduce
-- The potential impact
-- A suggested fix if you have one
+- Potential impact
+- Suggested fix (if you have one)
 
-You can expect an acknowledgement within 72 hours and a patch or mitigation
-within 14 days for critical issues.
+You can expect an acknowledgement within 72 hours and a patch within 14 days for critical issues.
+
+---
+
+## Security Architecture
+
+| Layer | Mechanism |
+|---|---|
+| **Portal authentication** | Cookie-based HMAC-SHA256 session token with timing-safe comparison |
+| **First-login enforcement** | Login with the default `changeme` password triggers a forced password change before accessing any page |
+| **Brute-force protection** | In-memory sliding window: 10 failed logins per IP per 15 minutes |
+| **API authorisation** | Every `/api/v1/*` route (except `/auth/*` and `/health`) requires a valid session |
+| **Secure cookie** | `Secure` flag is set automatically when `X-Forwarded-Proto: https` is present or `PORTAL_SECURE_COOKIES=true` is set |
+| **Shell injection prevention** | All child processes use `spawn(cmd, [args])` — user data is never interpolated into shell strings |
+| **Settings allow-list** | Only keys in `ALLOWED_SETTINGS` in `portal/server/routes/settings.js` can be written to `.env` |
+| **HTML output** | `v-html` is not used in Vue components; user-facing text goes through text interpolation |
+| **Secrets in repo** | No secrets committed; `.env` and `portal.env` are `.gitignore`d |
 
 ---
 
 ## Hardening Checklist for Production Deployments
 
-Follow all of these before exposing PrinterShare to the internet.
+### 1. Change the default password
 
-### 1. Enable portal authentication
+The default credentials are **admin / changeme**. The portal forces a password change on
+the first login with this password, but make sure it is done before anyone else can access
+the host.
 
-In `.env` (Docker) or `/etc/printershare/portal.env` (native):
+In `/etc/printershare/portal.env` (native) or `.env` (Docker), verify:
 
 ```
 PORTAL_AUTH=true
 PORTAL_USER=admin
-PORTAL_PASS=<long random password>
-PORTAL_SECRET=<32 random hex chars, e.g. openssl rand -hex 32>
+PORTAL_PASS=<strong password set via the portal>
+PORTAL_SECRET=<32-byte random hex — openssl rand -hex 32>
 ```
-
-The install scripts generate these automatically.
-Never use the `changeme` defaults outside of a local test environment.
 
 ### 2. Use HTTPS
 
-Terminate TLS at nginx before the portal.  Example with a self-signed cert:
+Terminate TLS at nginx before the portal. Example with a self-signed cert:
 
 ```bash
 openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
@@ -54,7 +65,7 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:4096 \
     -subj   "/CN=$(hostname)"
 ```
 
-Then add to your nginx server block:
+nginx server block addition:
 
 ```nginx
 listen 443 ssl;
@@ -62,47 +73,50 @@ ssl_certificate     /etc/ssl/certs/printershare.crt;
 ssl_certificate_key /etc/ssl/private/printershare.key;
 ssl_protocols       TLSv1.2 TLSv1.3;
 ssl_ciphers         HIGH:!aNULL:!MD5;
-# Redirect HTTP → HTTPS
+
 server {
     listen 80;
     return 301 https://$host$request_uri;
 }
 ```
 
-For a publicly routable domain, use [Certbot / Let's Encrypt](https://certbot.eff.org/)
-or enable the Cloudflare Tunnel profile (`COMPOSE_PROFILES=remote`).
+For a publicly routable domain use [Certbot / Let's Encrypt](https://certbot.eff.org/).
+For a private tunnel with no open ports, enable the Cloudflare Tunnel profile:
+
+```bash
+COMPOSE_PROFILES=remote docker compose up -d
+```
+
+When running behind an HTTPS proxy, set:
+```
+PORTAL_SECURE_COOKIES=true
+```
+so the portal sets the `Secure` flag on the session cookie correctly.
 
 ### 3. Restrict network exposure
 
-- Bind CUPS (port 631) to loopback only (default in `cupsd.conf`).
-- Restrict NFS (`NFS_ALLOWED_SUBNET`) to your LAN CIDR.
-- Only expose port 80/443 (nginx) to untrusted networks.
-- Do **not** expose saned (port 6566) to the internet.
+- Only ports **80** and **443** (nginx) should be reachable from untrusted networks
+- CUPS (631), saned (6566), Samba (445), and NFS (2049) must **not** be exposed to the internet
+- Restrict NFS exports to your LAN CIDR: `NFS_ALLOWED_SUBNET=192.168.1.0/24`
 
 ### 4. Change Samba credentials
 
-The install scripts auto-generate a random Samba password.  To change it:
+The setup wizard auto-generates a random Samba password. To change it manually:
 
 ```bash
-smbpasswd -a scanner   # or the SAMBA_USER you configured
+smbpasswd -a scanner
 ```
 
 ### 5. Keep the host patched
 
 ```bash
 apt-get update && apt-get upgrade -y
+unattended-upgrades   # enable for automatic security patches
 ```
 
----
+### 6. Note on unauthenticated endpoints
 
-## Security Architecture
-
-| Layer | Mechanism |
-|---|---|
-| Portal authentication | HMAC-SHA256 session token (cookie + Bearer), constant-time comparison |
-| Brute-force protection | In-memory sliding window: 10 failed logins per IP per 15 min |
-| API authorisation | Every `/api/v1/*` route (except `/auth/*` and `/health`) requires a valid session |
-| Shell injection prevention | All child processes use `spawn(cmd, [args])` — no string interpolation |
-| Settings allow-list | Only keys in `ALLOWED_SETTINGS` (`settings.js`) can be written to `.env` |
-| HTML output | `v-html` is not used; step text is sanitized through `SafeStepText.vue` |
-| Secrets in repo | No secrets committed; `.env` and `portal.env` are `.gitignore`d |
+`GET /api/v1/health` is intentionally unauthenticated so monitoring tools and the
+frontend can poll it without a session. It returns service topology (which services are
+running, Tailscale IP if present). This is acceptable on a trusted LAN but exposes
+internal topology if Tailscale is enabled and points to a wider network.

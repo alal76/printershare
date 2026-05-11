@@ -1,6 +1,10 @@
-# PrinterShare
+# PrinterShare — Beta v1.2.0
 
-A self-hosted, all-in-one printer and scanner sharing solution built on Docker Compose. Exposes USB printers and scanners over your local network via **AirPrint**, **IPP Everywhere**, **Samba**, and **NFS** — managed through a polished web portal.
+A self-hosted printer and scanner sharing solution. Exposes a USB all-in-one device over
+the local network via **AirPrint**, **IPP Everywhere**, and **Mopria**, with a web portal
+for scanning, job management, and configuration.
+
+> **Status:** Beta — running in production on a Proxmox LXC container.
 
 ---
 
@@ -9,144 +13,184 @@ A self-hosted, all-in-one printer and scanner sharing solution built on Docker C
 | Feature | Details |
 |---|---|
 | 🖨 **Print sharing** | AirPrint (iOS/macOS), IPP Everywhere (Windows 10/11), Mopria (Android) |
+| 📄 **Scan to PDF/image** | Multi-page flatbed, ADF auto-feed, 11 format + quality options |
+| 🔒 **Portal authentication** | Cookie-based session, brute-force rate limiting, forced password change on first login |
+| 🧙 **Setup Wizard** | 7-step guided first-run (USB detection, passwords, network, cloud, remote access) |
 | 🖥 **CUPS web UI** | Proxied at `/cups/` |
-| 📄 **Scan to folder** | scanservjs at `/scan/`, files served via the portal |
-| 📁 **File sharing** | Samba (SMB) + NFS shares from the scans volume |
-| ☁️ **Cloud backup** | rclone auto-upload of scans |
-| 🌐 **Remote access** | Tailscale VPN + Cloudflare Tunnel support |
-| 📱 **Mobile-first UI** | Progressive Web App with bottom navigation |
-| 🔧 **Setup Wizard** | 7-step guided first-run configuration |
+| ☁️ **Cloud backup** | rclone auto-upload of scans (Google Drive + OneDrive) |
+| 🌐 **Remote access** | Tailscale VPN + Cloudflare Tunnel (optional) |
+| 📱 **Mobile-first PWA** | Vue 3 progressive web app with bottom navigation |
+| 🔧 **Device quirks catalogue** | JSON-driven per-device driver/SANE-backend fix table |
 
 ---
 
 ## Architecture
 
-```
-┌─────────────┐   HTTP/HTTPS   ┌──────────────────────────────────────┐
-│   Browser   │◄──────────────►│  nginx (port 80/443)                  │
-│ iOS/Android │                │  /       → portal:3000                │
-│ Windows     │                │  /cups/  → cups:631                   │
-│ Linux       │                │  /scan/  → scanservjs:8080            │
-└─────────────┘                └──────────────────────────────────────┘
-                                         │
-              ┌──────────────────────────┼────────────────────────┐
-              ▼                          ▼                        ▼
-     ┌─────────────────┐     ┌────────────────────┐   ┌─────────────────┐
-     │  portal:3000    │     │   cups:631          │   │ scanservjs:8080 │
-     │  Vue 3 SPA +    │     │   CUPS + AirPrint   │   │  Web scan UI    │
-     │  Express API    │     │   Avahi daemon      │   │                 │
-     └─────────────────┘     └────────────────────┘   └─────────────────┘
-              │                          │
-     ┌────────┴──────┐        ┌──────────┴────────┐
-     ▼               ▼        ▼                   ▼
-  samba:445      nfs:2049  ipp-usb:631     paperless-ngx
-  SMB share      NFS share USB→IPP bridge  Document mgmt
-```
+\`\`\`
+USB Printer/Scanner
+      │ USB
+      ▼
+┌───────────── LXC / Linux Host ──────────────────┐
+│                                                 │
+│  ┌──────────┐  ┌─────────────┐  ┌───────────┐  │
+│  │  CUPS    │  │ scanservjs  │  │  Portal   │  │
+│  │  :631    │  │  :8080      │  │  :3000    │  │
+│  └────┬─────┘  └──────┬──────┘  └─────┬─────┘  │
+│       │               │               │        │
+│  ┌────▼───────────────▼───────────────▼─────┐  │
+│  │          nginx reverse proxy  :80/443     │  │
+│  │  /        → portal:3000                  │  │
+│  │  /cups/   → cups:631                     │  │
+│  │  /scan/   → scanservjs:8080              │  │
+│  └───────────────────────────────────────────┘  │
+│                                                 │
+│  ┌──────────┐  ┌──────────────┐                 │
+│  │  Samba   │  │  NFS :2049   │  (optional)     │
+│  │  :445    │  └──────────────┘                 │
+└──┴──────────┴────────────────────────────────────┘
+\`\`\`
+
+The portal is a **Vue 3 + TypeScript SPA** backed by an **Express 4** API server.
+In the native install the portal process is managed by `systemd` (`printershare-portal.service`).
+Docker Compose (`docker-compose.yml`) is also supported for hosts that prefer containers.
 
 ---
 
-## Prerequisites
+## Quick Start — Native Install (recommended)
 
-- Docker 24+ and Docker Compose v2
-- A Linux host (or Linux VM) with the USB printer/scanner attached
-- Port 80/443 open on your router (for remote access)
+Tested on Debian 12 / Ubuntu 22.04 LXC.
+
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/install.sh | sudo bash
+\`\`\`
+
+The installer:
+1. Installs system packages (CUPS, sane-utils, scanservjs, pdfunite, nginx, Node.js 20)
+2. Clones the repo to `/opt/printershare`
+3. Builds the portal frontend and installs `printershare-portal.service`
+4. Generates a random `PORTAL_PASS` and `PORTAL_SECRET` in `/etc/printershare/portal.env`
+5. Prints a summary with your credentials — **save them**
+
+After install, open **http://\<host-ip\>/** and complete the Setup Wizard.
+
+Default login: **admin / changeme** — you will be forced to change the password on first login.
+
+### Manual native install
+
+\`\`\`bash
+git clone https://github.com/alal76/printershare.git /opt/printershare
+cd /opt/printershare/portal
+npm install
+npm run build
+cp -r dist public
+# copy scripts/printershare-portal.service to /etc/systemd/system/ and enable
+\`\`\`
 
 ---
 
-## Quick Start
+## Quick Start — Docker Compose
 
-Set your server address once and use it throughout:
-
-```bash
-HOST_IP=<your-server-ip>
-```
-
-### 1. Clone and configure
-
-```bash
-git clone https://github.com/your-org/printershare.git
+\`\`\`bash
+git clone https://github.com/alal76/printershare.git
 cd printershare
-cp .env.example .env
-```
-
-Edit `.env` with your passwords and network settings (or use the Setup Wizard).
-
-### 2. Start the stack
-
-```bash
+cp .env.example .env    # edit passwords and network settings
 docker compose up -d
-```
+\`\`\`
 
-Or use the Makefile:
+Open **http://\<host-ip\>/** and run the Setup Wizard.
 
-```bash
+\`\`\`bash
 make up       # start all services
 make logs     # tail logs
 make down     # stop all services
-```
+\`\`\`
 
-### 3. Open the portal
+---
 
-Navigate to **http://${HOST_IP}/** in your browser. The Setup Wizard launches automatically on first run.
+## Proxmox LXC USB Passthrough
 
-For complete setup, operations, and troubleshooting instructions, see [USER_GUIDE.md](USER_GUIDE.md).
+If the host is an LXC container on Proxmox, pass USB through from the Proxmox node first:
+
+1. On the **Proxmox node**, identify the LXC ID and USB device:
+   \`\`\`bash
+   pct list && lsusb
+   \`\`\`
+2. Stop the container, add USB and Docker-friendly flags:
+   \`\`\`bash
+   pct stop <CTID>
+   pct set <CTID> -features nesting=1,keyctl=1
+   \`\`\`
+3. Edit `/etc/pve/lxc/<CTID>.conf`:
+   \`\`\`ini
+   lxc.cgroup2.devices.allow: c 189:* rwm
+   lxc.mount.entry: /dev/bus/usb dev/bus/usb none bind,optional,create=dir
+   \`\`\`
+4. Start and verify:
+   \`\`\`bash
+   pct start <CTID>
+   pct exec <CTID> -- lsusb
+   \`\`\`
 
 ---
 
 ## Setup Wizard
 
-The wizard guides you through 7 steps:
+The wizard runs automatically on first visit and guides you through 7 steps:
 
-1. **Prerequisites** — Verifies USB devices are attached and Docker volumes are ready
-2. **USB Detection** — Identifies your printer/scanner and assigns CUPS names
-3. **Passwords** — Sets Samba share password and portal admin secret
-4. **Network** — Configures HTTPS port, CUPS connection, and portal port
-5. **Cloud** — Optional rclone remote + bucket for scan auto-upload
+1. **Prerequisites** — Verifies USB device visibility
+2. **USB Detection** — Identifies printer/scanner, applies device quirks
+3. **Passwords** — Sets portal admin password and Samba share password
+4. **Network** — Configures HTTPS port and CUPS connection
+5. **Cloud** — Optional rclone remote for scan auto-upload
 6. **Remote Access** — Optional Tailscale auth key + Cloudflare tunnel token
-7. **Confirm** — Builds and starts all services
+7. **Confirm** — Starts all services
+
+---
+
+## Scanning
+
+The portal scan page provides:
+
+| Setting | Options |
+|---|---|
+| **Format** | PDF (High / Medium / Low / Lossless), JPEG (High / Med / Low), PNG, TIFF, OCR→PDF, OCR→text |
+| **Resolution** | 150 / 300 / 600 / 1200 dpi |
+| **Color mode** | Color, Grayscale, Line Art (B&W) |
+| **Source** | Flatbed, ADF |
+| **Multi-page PDF** | Flatbed: scan pages one by one, combine to single PDF on finish |
+| **ADF auto-feed** | Select ADF + multi-page → single request feeds all pages automatically |
+| **Image filters** | Auto-contrast, auto-levels, threshold, blur, more-contrast |
+
+Available format choices are automatically filtered against the scanner's actual capabilities
+at page load.
 
 ---
 
 ## Client Setup
 
 ### macOS / iOS (AirPrint)
-No configuration needed. Your printer appears in the Print dialog automatically via Bonjour/mDNS.
+No configuration needed — the printer appears in the Print dialog automatically via Bonjour.
 
 ### Windows 10/11 (IPP Everywhere)
-1. Open **Settings → Bluetooth & devices → Printers & scanners**
-2. Click **Add device** — Windows discovers the IPP printer automatically
-3. If not found, choose **Add manually** and enter:
-   ```
-   http://${HOST_IP}:631/printers/USB-Printer
-   ```
+1. **Settings → Bluetooth & devices → Printers & scanners → Add device**
+2. If auto-discovery fails, add manually: `http://<host-ip>:631/printers/USB-Printer`
+
+Samba scans share: `\\<host-ip>\scans`
 
 ### Android (Mopria)
-1. Install [Mopria Print Service](https://play.google.com/store/apps/details?id=org.mopria.printplugin) from Google Play
-2. Open any document and tap **Print** — the printer appears automatically
+Install [Mopria Print Service](https://play.google.com/store/apps/details?id=org.mopria.printplugin),
+then any app's Print menu will discover the printer.
 
-### Linux (CUPS)
-```bash
-sudo lpadmin -p MyPrinter -E \
-  -v ipp://${HOST_IP}:631/printers/USB-Printer \
-  -m everywhere
+### Linux
+\`\`\`bash
+sudo lpadmin -p MyPrinter -E -v ipp://<host-ip>:631/printers/USB-Printer -m everywhere
 lpoptions -d MyPrinter
-```
+\`\`\`
 
-### Samba / Windows File Share
-| Platform | Path |
-|---|---|
-| Windows | `\\${HOST_IP}\scans` |
-| macOS   | `smb://${HOST_IP}/scans` |
-| Android | Connect via a file manager app |
-
-### NFS (Linux/macOS)
-```bash
-# macOS
-mount -t nfs ${HOST_IP}:/data/scans /mnt/scans
-
-# Linux
-sudo mount -t nfs ${HOST_IP}:/data/scans /mnt/scans
-```
+NFS share:
+\`\`\`bash
+sudo mount -t nfs <host-ip>:/exports/scans /mnt/scans
+\`\`\`
 
 ---
 
@@ -154,197 +198,55 @@ sudo mount -t nfs ${HOST_IP}:/data/scans /mnt/scans
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORTAL_PORT` | `3000` | Portal Express server port |
-| `PORTAL_SECRET` | — | HMAC session secret (set a strong random value) |
-| `PORTAL_AUTH` | `false` | Set `true` to enable login (recommended in production) |
+| `PORTAL_AUTH` | `true` | Enable portal login (`false` only for trusted private LAN) |
+| `PORTAL_USER` | `admin` | Portal admin username |
+| `PORTAL_PASS` | `changeme` | Portal admin password — **always change on first login** |
+| `PORTAL_SECRET` | — | HMAC session secret — generate with `openssl rand -hex 32` |
+| `PORTAL_SECURE_COOKIES` | — | Set `true` to force `Secure` cookie flag behind an HTTPS proxy |
+| `PORTAL_PORT` | `3000` | Portal Express port |
 | `NGINX_HTTP_PORT` | `80` | nginx HTTP port |
 | `NGINX_HTTPS_PORT` | `443` | nginx HTTPS port |
-| `CUPS_HOST` | `cups` | CUPS service hostname |
-| `CUPS_PORT` | `631` | CUPS service port |
+| `CUPS_HOST` | `cups` | CUPS hostname |
+| `CUPS_PORT` | `631` | CUPS port |
 | `SAMBA_PASS` | — | Samba share password |
-| `SAMBA_WORKGROUP` | `WORKGROUP` | Samba workgroup name |
+| `SAMBA_WORKGROUP` | `WORKGROUP` | Samba workgroup |
 | `SAMBA_SHARE` | `scans` | Samba share name |
-| `NFS_ALLOWED_SUBNET` | `192.168.0.0/16` | Allowed NFS client network (CIDR) |
-| `SCANS_HOST_PATH` | `/srv/printershare/scans` | Host path for scan files |
-| `RCLONE_GDRIVE_REMOTE` | — | Rclone remote name for Google Drive cloud upload |
-| `RCLONE_ONEDRIVE_REMOTE` | — | Rclone remote name for OneDrive cloud upload |
+| `NFS_ALLOWED_SUBNET` | `192.168.0.0/16` | Allowed NFS client CIDR |
+| `SCANS_HOST_PATH` | `/srv/printershare/scans` | Host path for scan files (Docker) |
+| `SCANS_PATH` | `/scans` | Scan files directory (native) |
+| `SCANSERVJS_URL` | auto | Override scanservjs URL |
+| `RCLONE_GDRIVE_REMOTE` | — | rclone remote name for Google Drive |
+| `RCLONE_ONEDRIVE_REMOTE` | — | rclone remote name for OneDrive |
 | `TAILSCALE_AUTH_KEY` | — | Tailscale auth key for VPN |
 | `CLOUDFLARE_TUNNEL_TOKEN` | — | Cloudflare Tunnel token |
-| `COMPOSE_PROFILES` | — | Comma-separated optional profiles: `docs`, `remote` |
+| `COMPOSE_PROFILES` | — | Optional Docker profiles: `docs`, `remote` |
 
-See [`.env.example`](.env.example) for the full list with documentation.
-
----
-
-## Development
-
-```bash
-cd portal
-
-# Install dependencies
-npm install
-
-# Start dev server (Vite + Express with hot reload)
-npm run dev
-
-# Lint
-npm run lint
-npm run lint:fix
-
-# Type-check
-npm run type-check
-
-# Unit tests (client + server)
-npm test
-
-# Unit tests with coverage
-npm run test:coverage
-
-# E2E tests (requires the portal running at localhost:4173)
-npm run test:e2e
-npm run test:e2e:ui   # Playwright UI mode
-```
-
-### Project layout
-
-```
-portal/
-├── server/               Express API (CommonJS)
-│   ├── app.js            Bare Express app (no listen — used by tests)
-│   ├── index.js          Entry point (app.listen)
-│   ├── data/
-│   │   └── device-quirks.json  Per-device driver / SANE-backend hints
-│   ├── lib/
-│   │   ├── env.js              .env read/write helpers
-│   │   └── device-quirks.js    Quirks catalogue lookup
-│   └── routes/           One file per API resource
-├── src/                  Vue 3 + TypeScript SPA
-│   ├── components/       Reusable UI components
-│   ├── composables/      Reusable composition functions
-│   ├── router/           Vue Router 4
-│   ├── stores/           Pinia stores
-│   └── views/            Page-level view components
-└── tests/
-    ├── setup/            Vitest setup (client + server)
-    ├── unit/
-    │   ├── server/       Express route tests (supertest)
-    │   └── stores/       Pinia store tests (vitest + jsdom)
-    └── e2e/              Playwright browser tests
-```
-
----
-
-## Device quirks catalogue
-
-PrinterShare ships a JSON catalogue of known device-specific fixes at
-[`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json).
-This is the single source of truth for "Brand X model Y needs driver Z and SANE
-backend W disabled" — both the **installer** ([`scripts/proxmox/install.sh`](scripts/proxmox/install.sh))
-and the **setup wizard** (via [`portal/server/lib/device-quirks.js`](portal/server/lib/device-quirks.js))
-consult it. There are **no hardcoded model checks** in shell or JavaScript.
-
-### Catalogue schema
-
-Keys are lowercase `vid:pid` (USB vendor + product IDs) or `vid:*` for a whole
-brand. Lookup falls back from exact → vendor → make string → none.
-
-```jsonc
-{
-  "04e8:344f": {
-    "name":  "Samsung SCX-3400 Series",
-    "make":  "samsung",
-    "kind":  "mfp",                        // printer | scanner | mfp | auto
-    "print": {
-      "ppd":      "suld:Samsung_SCX-3400_Series.ppd.gz",   // resolved as /usr/share/ppd/<sub>/<file>
-      "packages": ["suld-driver2-1.00.39"],                // apt packages to install
-      "uri_hint": "usb://Samsung/SCX-3400%20Series"
-    },
-    "scan": {
-      "sane_backend":   "smfp",            // preferred backend name
-      "sane_blacklist": ["xerox_mfp"],     // backends commented out of /etc/sane.d/dll.conf
-      "packages":       ["suld-driver2-1.00.39"]
-    },
-    "ipp_usb": false,                      // does ipp-usb work?
-    "airsane": "ok",                       // ok | broken | untested
-    "notes":   "Samsung ULD …"             // shown to the user in the wizard
-  }
-}
-```
-
-### Adding a new device
-
-1. Open [`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json),
-   add a new entry keyed by your device's USB VID:PID (find it with `lsusb`).
-2. Commit + push. The next `./scripts/deploy.sh` picks it up.
-3. On the host, reconcile the live system without rebooting:
-
-   ```bash
-   ./scripts/apply-device-quirks.sh        # prints packages to apt-get install
-   curl -X POST http://localhost/api/v1/wizard/apply-quirks   # via the portal
-   ```
-
-The installer also re-runs `apply-device-quirks.sh` on every `git pull` →
-`./scripts/deploy.sh`, so the catalogue is always in sync.
-
-### How the helper script works
-
-[`scripts/apply-device-quirks.sh`](scripts/apply-device-quirks.sh):
-
-1. Enumerates connected USB devices (`lsusb`).
-2. For each VID:PID, finds a matching catalogue entry.
-3. If the preferred SANE backend's conf file is installed, comments out every
-   backend named in `scan.sane_blacklist` inside `/etc/sane.d/dll.conf`.
-4. Prints the union of all `print.packages` + `scan.packages` on stdout so
-   the caller can `apt-get install` them.
-
-The script is idempotent and safe to re-run.
-
----
-
-## Security
-
-> **Before exposing PrinterShare to the internet**, read [SECURITY.md](SECURITY.md) in full.
-
-The short version:
-
-1. **Authentication is on by default.** Both install scripts generate a random
-   `PORTAL_PASS` and `PORTAL_SECRET` on first run and print them in the summary.
-   Keep them safe — they're stored in `/etc/printershare/portal.env` (native) or
-   your `.env` file (Docker).
-
-2. **Use HTTPS.** Terminate TLS at nginx. For a public domain use Let's Encrypt /
-   Certbot. For LAN use a self-signed cert or the Cloudflare Tunnel profile
-   (`COMPOSE_PROFILES=remote`).  The nginx config ships an HTTPS block commented
-   out in `nginx/nginx.conf` — uncomment and point to your cert.
-
-3. **Restrict ports.** Only ports 80 and 443 (nginx) need to be reachable from
-   untrusted networks. CUPS (631), saned (6566), Samba (445), and NFS (2049)
-   must **not** be exposed to the internet.
-
-4. **Change Samba credentials** if you didn't accept the auto-generated ones:
-   `smbpasswd -a scanner`.
-
-The install scripts never write secrets to git — `.env` and `portal.env` are
-`.gitignore`d. See [SECURITY.md](SECURITY.md) for the full hardening checklist and
-architecture overview.
+- Native install reads from `/etc/printershare/portal.env`
+- Docker install reads from `.env` in the project root
 
 ---
 
 ## API Reference
 
-Base path: `/api/v1`
+All routes under `/api/v1/` except `/auth/*` and `/health` require a valid session cookie
+(set by `POST /api/v1/auth/login`).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET`    | `/health` | Service health check |
+| `POST`   | `/auth/login` | Login → sets `ps_session` cookie; returns `mustChangePassword` |
+| `POST`   | `/auth/change-password` | Change password (required on first login with `changeme`) |
+| `POST`   | `/auth/logout` | Invalidate session |
+| `GET`    | `/health` | Service health check (unauthenticated) |
 | `GET`    | `/system/info` | Host system info |
 | `GET`    | `/devices` | USB devices + CUPS printers |
 | `POST`   | `/devices/printer` | Add a network printer to CUPS |
 | `DELETE` | `/devices/printer/:name` | Remove a printer from CUPS |
 | `POST`   | `/devices/printer/:name/test` | Print a test page |
 | `GET`    | `/scans` | List scan files |
+| `GET`    | `/scans/context` | Scanner device capabilities proxied from scanservjs |
 | `GET`    | `/scans/:filename` | Download a scan file |
 | `DELETE` | `/scans/:filename` | Delete a scan file |
+| `POST`   | `/scans/combine` | Merge single-page PDFs into one via `pdfunite` |
 | `GET`    | `/printer/queue` | CUPS print queue + status |
 | `POST`   | `/printer/print` | Upload and print a file |
 | `GET`    | `/settings` | Read configuration (secrets redacted) |
@@ -353,322 +255,157 @@ Base path: `/api/v1`
 | `POST`   | `/wizard/state` | Update wizard step |
 | `POST`   | `/wizard/build` | Build and start all services |
 | `POST`   | `/wizard/reset` | Reset wizard state |
-| `GET`    | `/wizard/quirks?vidpid=04e8:344f` | Per-device driver hints (see [Device quirks catalogue](#device-quirks-catalogue)) |
-| `GET`    | `/wizard/driver-check?vidpid=…&make=…` | Driver availability check + quirks lookup |
-| `POST`   | `/wizard/apply-quirks` | Reconcile SANE config against connected USB devices (native mode) |
+| `GET`    | `/wizard/quirks?vidpid=…` | Per-device driver hints |
+| `GET`    | `/wizard/driver-check?vidpid=…&make=…` | Driver availability + quirks lookup |
+| `POST`   | `/wizard/apply-quirks` | Reconcile SANE config against connected USB devices |
 | `GET`    | `/logs/:service` | Tail service logs |
-| `GET`    | `/services` | Docker service status |
+| `GET`    | `/services` | Service status |
 | `POST`   | `/services/:name/restart` | Restart a service |
+
+---
+
+## Device Quirks Catalogue
+
+The canonical per-device fix table lives in
+[`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json).
+
+Keys are lowercase `vid:pid` or `vid:*` vendor wildcards.
+Lookup falls back: exact → vendor → make string → none.
+
+\`\`\`jsonc
+{
+  "04e8:344f": {
+    "name":  "Samsung SCX-3400 Series",
+    "make":  "samsung",
+    "kind":  "mfp",
+    "print": {
+      "ppd":      "suld:Samsung_SCX-3400_Series.ppd.gz",
+      "packages": ["suld-driver2-1.00.39"],
+      "uri_hint": "usb://Samsung/SCX-3400%20Series"
+    },
+    "scan": {
+      "sane_backend":   "smfp",
+      "sane_blacklist": ["xerox_mfp"],
+      "packages":       ["suld-driver2-1.00.39"]
+    },
+    "ipp_usb": false,
+    "airsane": "ok",
+    "notes":   "Requires Samsung ULD driver. ipp-usb does not work with this model."
+  }
+}
+\`\`\`
+
+To add a new device: add an entry keyed by VID:PID from `lsusb`, commit, then reconcile
+on the host:
+
+\`\`\`bash
+curl -X POST http://<host-ip>/api/v1/wizard/apply-quirks
+\`\`\`
+
+---
+
+## Development
+
+\`\`\`bash
+cd portal
+npm install
+
+npm run dev          # Vite dev server + Express with hot reload
+npm run lint         # ESLint (must be 0 errors, 0 warnings)
+npm run type-check   # TypeScript strict check
+npm test             # Unit tests — 56 tests across 8 suites
+npm run test:e2e     # Playwright E2E tests
+\`\`\`
+
+### Project layout
+
+\`\`\`
+portal/
+├── server/                  Express API (CommonJS)
+│   ├── app.js               Bare app (used by tests)
+│   ├── index.js             Entry point (app.listen)
+│   ├── data/
+│   │   └── device-quirks.json
+│   ├── lib/
+│   │   ├── auth.js          Session tokens, rate limiting, password management
+│   │   ├── env.js           .env read/write helpers
+│   │   └── device-quirks.js Quirks catalogue lookup
+│   └── routes/              One file per API resource
+└── src/                     Vue 3 + TypeScript SPA
+    ├── components/
+    ├── composables/
+    ├── router/
+    ├── stores/
+    └── views/
+\`\`\`
 
 ---
 
 ## Deployment
 
-### Automated deploy script
+### Deploy script
 
-```bash
-./scripts/deploy.sh                  # pull + build + restart
-./scripts/deploy.sh --no-build       # skip image build
-./scripts/deploy.sh --env-file /path/to/.env
-```
+\`\`\`bash
+./scripts/deploy.sh          # git pull + build portal + restart service
+\`\`\`
 
-### Proxmox LXC USB passthrough (container host 192.168.0.9)
-
-If your Docker host is an LXC container on Proxmox (for example at `192.168.0.9`), pass the USB bus through from the Proxmox node into that LXC container before starting PrinterShare.
-
-1. On the Proxmox node, identify the LXC ID and USB device:
-  ```bash
-  pct list
-  lsusb
-  ```
-2. Stop the LXC container:
-  ```bash
-  pct stop <CTID>
-  ```
-3. Enable Docker-friendly LXC features:
-  ```bash
-  pct set <CTID> -features nesting=1,keyctl=1
-  ```
-4. Edit `/etc/pve/lxc/<CTID>.conf` and add:
-  ```ini
-  lxc.cgroup2.devices.allow: c 189:* rwm
-  lxc.mount.entry: /dev/bus/usb dev/bus/usb none bind,optional,create=dir
-  ```
-5. Start the container and verify USB visibility inside it:
-  ```bash
-  pct start <CTID>
-  pct exec <CTID> -- lsusb
-  ```
-6. In the LXC container (`192.168.0.9`), start PrinterShare:
-  ```bash
-  cd /path/to/printershare
-  docker compose up -d
-  ```
-
-If `lsusb` inside the container does not show your device, unplug and reconnect the USB cable, then restart the LXC container and retry.
+On the LXC host this runs:
+\`\`\`bash
+cd /opt/printershare
+git pull --ff-only
+cd portal && npm run build
+rm -rf public && cp -r dist public
+systemctl restart printershare-portal
+\`\`\`
 
 ### Backup
 
-```bash
+\`\`\`bash
 ./scripts/backup.sh                  # → backups/YYYY-MM-DD_HH-MM-SS.tar.gz
-./scripts/backup.sh --dest /mnt/nas  # custom destination
-```
+./scripts/backup.sh --dest /mnt/nas
+\`\`\`
 
 ### Creating a release
 
-```bash
+\`\`\`bash
 ./scripts/release.sh patch   # bump patch version, tag, push
 ./scripts/release.sh minor
 ./scripts/release.sh major
-```
-
-GitHub Actions will automatically:
-1. Build and push the Docker image to `ghcr.io`
-2. Create a GitHub Release with auto-generated notes
+\`\`\`
 
 ---
 
 ## Security
 
-- All secrets are stored in `.env` and never committed
-- The portal API redacts sensitive env vars in `GET /settings` responses
-- Input validation on all API routes (printer names, URIs, filenames)
-- Path traversal protection on all file-serving endpoints
-- `X-Powered-By` header disabled
+See [SECURITY.md](SECURITY.md) for the full hardening checklist.
+
+Key points:
+- Authentication is **on by default** (`PORTAL_AUTH=true`)
+- First login with `changeme` forces an immediate password change
+- All `/api/v1/*` routes except `/auth/*` and `/health` require a valid session
+- Brute-force protection: 10 failed logins per IP per 15 minutes
+- All child processes use `spawn(cmd, [args])` — never string interpolation
+- The `Secure` cookie flag is set automatically when the portal detects HTTPS
+  via `X-Forwarded-Proto` header or `PORTAL_SECURE_COOKIES=true`
 
 ---
-
-## Legacy / Original Components
-
-The following components from the original project remain available:
-
-| Component | Role |
-|---|---|
-| **USB/IP** | Raw USB port sharing over TCP/IP (`usbip/`) |
-| **NFS** | Unix/macOS network file share (`nfs/`) |
-| **Samba** | SMB/CIFS share for scan files (`samba/`) |
-| **rclone** | Post-scan cloud upload (`scripts/setup-rclone.sh`) |
-| **Client scripts** | Platform setup scripts in `clients/` |
-
----
-
-## Licence
-
-All components are open-source. This configuration is MIT licenced.
 
 ## Components
 
-| Component | Role | Project |
-|-----------|------|---------|
-| **CUPS** | USB printer sharing — IPP + Bonjour auto-discovery | [cups.org](https://www.cups.org) |
-| **Scanservjs** | Web UI — scan, preview, download from any browser | [github.com/sbs20/scanservjs](https://github.com/sbs20/scanservjs) |
-| **rclone** | Post-scan upload → Google Drive + OneDrive | [rclone.org](https://rclone.org) |
-| **Samba** | SMB/CIFS share for scan files (Windows & Mac) | [samba.org](https://www.samba.org) |
-| **NFS** | Unix/macOS network file share for scan files | Linux kernel NFS |
-| **Nginx** | Reverse proxy — single port 80 entry point | [nginx.org](https://nginx.org) |
-| **USB/IP** | Raw USB port sharing over TCP/IP | Linux kernel |
-
----
-
-## Architecture
-
-```
-USB Printer/Scanner  (physical device)
-        │ USB cable
-        ▼
-┌──────────────── Linux Server ──────────────────────┐
-│                                                    │
-│  ┌──────────┐  ┌────────────┐  ┌───────────────┐  │
-│  │  CUPS    │  │ Scanservjs │  │  USB/IP :3240 │  │
-│  │  :631    │  │  :8080     │  └───────┬───────┘  │
-│  └────┬─────┘  └─────┬──────┘          │          │
-│       │              │                 │          │
-│  ┌────▼──────────────▼────────┐        │          │
-│  │  Nginx reverse proxy  :80  │        │          │
-│  └────────────────────────────┘        │          │
-│                                        │          │
-│  ┌──────────┐  ┌──────────────┐        │          │
-│  │  Samba   │  │  NFS :2049   │        │          │
-│  │  :445    │  └──────┬───────┘        │          │
-└──┼──────────┼─────────┼────────────────┼──────────┘
-   │          │         │                │
-   └──────────┴─────────┴────────────────┘
-                        │
-          ┌─────────────▼──────────────┐
-          │   LAN Clients              │
-          │   Windows / macOS / Linux  │
-          └─────────────┬──────────────┘
-                        │
-          ┌─────────────▼──────────────┐
-          │   Cloud Storage            │
-          │   Google Drive / OneDrive  │
-          └────────────────────────────┘
-```
-
----
-
-## Quick Start (Docker Compose)
-
-**Prerequisites:** Linux server with Docker + Docker Compose v2, USB device plugged in.
-
-```bash
-# 1. Clone
-git clone https://github.com/alal76/printershare
-cd printershare
-
-# 2. Configure
-make setup        # creates /srv/printershare/scans + .env
-nano .env         # change default passwords
-
-# 3. Build & run
-make build
-make start
-```
-
-| Service | URL / Address |
-|---------|---------------|
-| Scanner web UI | `http://${HOST_IP}/` |
-| CUPS admin | `http://${HOST_IP}:631/` |
-| Samba share | `\\${HOST_IP}\Scans` |
-| NFS export | `${HOST_IP}:/exports/scans` |
-
----
-
-## Add Printer in CUPS
-
-1. Open `http://${HOST_IP}:631/`
-2. Administration → Add Printer → select your USB printer
-3. Choose driver (HPLIP for HP, Gutenprint for Epson/Canon, or upload PPD)
-4. Printer is now discoverable on the LAN via Bonjour/IPP
-
----
-
-## Scanner Web UI
-
-Open `http://${HOST_IP}/` in any browser on the LAN.
-- Choose resolution, colour mode, format (PDF / JPEG / PNG)
-- Click **Scan** → preview in browser → **Download**
-- Files auto-saved to shared folder (`/srv/printershare/scans`)
-- If rclone is configured: auto-uploaded to Google Drive + OneDrive
-
----
-
-## Cloud Upload (rclone)
-
-```bash
-# Docker:
-docker exec -it ps-scanservjs bash scripts/setup-rclone.sh
-
-# Native:
-bash scripts/setup-rclone.sh
-
-# Test:
-make test-rclone
-```
-
----
-
-## Client Setup
-
-**Linux**
-```bash
-bash clients/client-linux.sh ${HOST_IP}
-```
-
-**macOS**
-```bash
-bash clients/client-macos.sh ${HOST_IP}
-```
-
-**Windows** — double-click or run as Administrator:
-```
-client-windows.bat ${HOST_IP}
-```
-
----
-
-## USB/IP (Raw USB Port Sharing)
-
-```bash
-# Server
-make install-usbip
-
-# Linux client
-sudo modprobe vhci-hcd
-usbip list -r ${HOST_IP}
-sudo usbip attach -r ${HOST_IP} -b <busid>
-
-# Windows — download usbip-win or usbipkit (GUI)
-# macOS   — bash clients/client-macos.sh ${HOST_IP} usbip
-```
-
----
-
-## Native Install (No Docker)
-
-```bash
-make install-native
-make install-usbip   # optional
-bash scripts/setup-rclone.sh  # optional cloud upload
-```
-
----
-
-## File Structure
-
-```
-printershare/
-├── docker-compose.yml
-├── .env.example
-├── Makefile
-├── cups/
-│   ├── Dockerfile
-│   ├── cupsd.conf
-│   └── entrypoint.sh
-├── scanservjs/
-│   ├── Dockerfile
-│   ├── config.js
-│   └── scripts/scan-save-upload.sh
-├── nginx/nginx.conf
-├── nfs/exports
-├── usbip/README.md
-├── scripts/
-│   ├── install-native.sh
-│   ├── install-usbip-server.sh
-│   └── setup-rclone.sh
-└── clients/
-    ├── client-linux.sh
-    ├── client-macos.sh
-    └── client-windows.bat
-```
-
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCANS_HOST_PATH` | `/srv/printershare/scans` | Host path for scan files |
-| `CUPS_ADMIN_USER` | `admin` | CUPS web admin username |
-| `CUPS_ADMIN_PASS` | `changeme` | CUPS web admin password — **change this** |
-| `SAMBA_USER` | `scanner` | Samba username |
-| `SAMBA_PASS` | `scanner123` | Samba password — **change this** |
-| `RCLONE_GDRIVE_REMOTE` | `gdrive` | rclone remote name for Google Drive |
-| `RCLONE_ONEDRIVE_REMOTE` | `onedrive` | rclone remote name for OneDrive |
-| `NGINX_HTTP_PORT` | `80` | Nginx listen port |
-| `SCANSERVJS_PORT` | `8080` | Direct Scanservjs port |
-
----
-
-## Security Notes
-
-- **Change** default passwords in `.env` before deploying
-- Restrict `nfs/exports` to your LAN subnet (e.g. `192.168.1.0/24`) in production
-- CUPS admin is HTTP Basic Auth protected
-- For internet exposure: add HTTPS via Nginx + Certbot
+| Component | Role |
+|---|---|
+| **CUPS** | USB printer sharing — IPP + Bonjour auto-discovery |
+| **scanservjs** | Scan backend + preview UI (`/scan/`) |
+| **Portal** | Vue 3 SPA + Express API — main user interface |
+| **nginx** | Reverse proxy, single port 80/443 entry point |
+| **Samba** | SMB/CIFS share for scan files |
+| **NFS** | Unix/macOS network file share |
+| **rclone** | Post-scan cloud upload (Google Drive / OneDrive) |
+| **Tailscale** | Optional VPN for remote access |
+| **Cloudflare Tunnel** | Optional HTTPS tunnel (no port-forward needed) |
 
 ---
 
 ## Licence
 
-All components are open-source. This configuration is MIT licenced.
+MIT

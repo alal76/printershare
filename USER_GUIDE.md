@@ -1,167 +1,230 @@
-# PrinterShare User Guide
+# PrinterShare User Guide — v1.2.0 Beta
 
-This guide covers deployment, first-run setup, daily use, and troubleshooting for PrinterShare.
+This guide covers installation, first-run setup, daily use, and troubleshooting.
 
 ## Set host placeholder once
 
-Define your server address once and reuse it in this guide:
+Define your server address once and reuse throughout this guide:
 
 ```bash
-HOST_IP=<your-server-ip>
+HOST_IP=192.168.0.159   # replace with your host IP
 ```
 
-## 1. Deployment target
+Portal endpoints after installation:
 
-This guide assumes PrinterShare is deployed on:
-- Host IP: ${HOST_IP}
-- Host type: Proxmox LXC container running Docker
+| Endpoint | URL |
+|---|---|
+| Portal (login + scan + devices) | `http://${HOST_IP}/` |
+| CUPS admin (proxied) | `http://${HOST_IP}/cups/` |
+| scanservjs raw UI | `http://${HOST_IP}/scan/` |
+| API health check | `http://${HOST_IP}/api/v1/health` |
 
-Portal endpoints after deployment:
-- Portal: http://${HOST_IP}/
-- Scan UI: http://${HOST_IP}/scan/
-- CUPS: http://${HOST_IP}/cups/
+---
 
-## 2. Prerequisites
+## 1. Installation
 
-Required:
-- Proxmox VE node with a USB printer/scanner physically connected
-- LXC container configured for Docker
-- Docker and Docker Compose plugin installed inside the container
-- LAN clients on the same network as ${HOST_IP}
-
-Recommended:
-- Static IP reservation for the container
-- Updated firmware/drivers for printer/scanner
-
-## 3. Proxmox LXC USB passthrough
-
-Run these commands on the Proxmox node (not inside the LXC container).
-
-### 3.1 Identify container and USB devices
+### 1.1 Native install (Debian 12 / Ubuntu 22.04 LXC) — recommended
 
 ```bash
-pct list
-lsusb
+curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/install.sh | sudo bash
 ```
 
-### 3.2 Stop the target container
+The installer:
+- Installs CUPS, sane-utils, scanservjs, pdfunite (poppler-utils), nginx, Node.js 20
+- Clones the repo to `/opt/printershare`
+- Builds the portal frontend
+- Creates `/etc/systemd/system/printershare-portal.service` and enables it
+- Generates random `PORTAL_PASS` and `PORTAL_SECRET` in `/etc/printershare/portal.env`
+- Prints your credentials at the end — **write them down**
+
+Services managed by systemd:
+- `printershare-portal` — the Vue 3 portal (Express on port 3000)
+- `cups` — CUPS print server
+- `scanservjs` — scan backend on port 8080
+- `nginx` — reverse proxy on port 80
+
+### 1.2 Docker Compose
 
 ```bash
+git clone https://github.com/alal76/printershare.git
+cd printershare
+cp .env.example .env   # set PORTAL_PASS, PORTAL_SECRET, SAMBA_PASS
+docker compose up -d
+docker compose ps      # verify all services are Up
+```
+
+---
+
+## 2. Proxmox LXC USB passthrough
+
+If the host is an LXC container, USB must be passed through from the Proxmox node.
+
+### 2.1 On the Proxmox node
+
+```bash
+pct list                        # find your container ID
+lsusb                           # confirm printer is visible on the node
 pct stop <CTID>
-```
-
-### 3.3 Enable required LXC features for Docker
-
-```bash
 pct set <CTID> -features nesting=1,keyctl=1
 ```
 
-### 3.4 Pass USB bus into container
-
-Edit /etc/pve/lxc/<CTID>.conf and add:
+Edit `/etc/pve/lxc/<CTID>.conf` and add:
 
 ```ini
 lxc.cgroup2.devices.allow: c 189:* rwm
 lxc.mount.entry: /dev/bus/usb dev/bus/usb none bind,optional,create=dir
 ```
 
-### 3.5 Start and verify
-
 ```bash
 pct start <CTID>
-pct exec <CTID> -- lsusb
+pct exec <CTID> -- lsusb     # printer must appear here
 ```
 
-Expected result:
-- The printer/scanner appears in lsusb output from inside the container.
+If the printer is not visible: unplug and replug the USB cable, then re-run the last command.
 
-If not visible:
-- Replug the USB cable
-- Re-run pct exec <CTID> -- lsusb
-- Restart the container and check again
+---
 
-## 4. Install and start PrinterShare
+## 3. First login and password change
 
-Run these commands inside the LXC container.
+1. Open `http://${HOST_IP}/` in your browser
+2. Log in with:
+   - **Username:** `admin`
+   - **Password:** `changeme` (or the generated password from the installer summary)
+3. If you log in with the default password `changeme`, you will be redirected to the
+   **Change Password** page immediately — enter a new password (minimum 8 characters)
+4. After changing the password, you land on the dashboard
+
+> The generated password from the installer is stored in `/etc/printershare/portal.env`
+> as `PORTAL_PASS`. After changing it via the portal, the file is updated automatically —
+> no service restart required.
+
+---
+
+## 4. Setup Wizard
+
+The wizard launches automatically when PrinterShare has not been configured yet.
+
+Step-by-step:
+
+| Step | What it does |
+|---|---|
+| **Prerequisites** | Checks USB visibility and system dependencies |
+| **USB Detection** | Reads `lsusb`, matches against the device quirks catalogue, suggests PPD and SANE backend |
+| **Passwords** | Sets Samba share password |
+| **Network** | Confirms nginx ports and CUPS connection |
+| **Cloud** | Optional: configure rclone remote for Google Drive or OneDrive |
+| **Remote Access** | Optional: Tailscale auth key + Cloudflare tunnel token |
+| **Confirm** | Applies device quirks, creates CUPS queue, starts all services |
+
+You can re-run the wizard at any time from the portal settings page, or reset it:
 
 ```bash
-git clone https://github.com/your-org/printershare.git
-cd printershare
-cp .env.example .env
+curl -X POST http://${HOST_IP}/api/v1/wizard/reset
 ```
 
-Edit .env and set at minimum:
-- CUPS credentials
-- Samba credentials
-- Network and storage values for your LAN
+---
 
-Start the stack:
+## 5. Printing
 
-```bash
-docker compose up -d
-```
+### 5.1 Windows 10/11 (IPP Everywhere — no driver required)
 
-Check status:
+1. **Settings → Bluetooth & devices → Printers & scanners → Add device**
+2. Windows auto-discovers the printer on the LAN
+3. If not found, click **Add manually** and enter:
+   `http://${HOST_IP}:631/printers/USB-Printer`
 
-```bash
-docker compose ps
-docker compose logs -f --tail=100
-```
+### 5.2 macOS / iOS (AirPrint)
 
-## 5. First-run wizard
+No setup needed — the printer appears in the Print dialog automatically via Bonjour/mDNS.
 
-1. Open http://${HOST_IP}/
-2. Complete all wizard steps:
-- Prerequisites
-- USB detection
-- Passwords
-- Network
-- Cloud (optional)
-- Remote access (optional)
-- Confirm
+### 5.3 Android (Mopria)
 
-When complete, confirm:
-- Printer appears in Devices view
-- Scan UI opens at /scan/
-- Health view reports all core services as healthy
+1. Install [Mopria Print Service](https://play.google.com/store/apps/details?id=org.mopria.printplugin)
+2. Open any app and tap **Print** — the printer is discovered automatically
 
-## 6. Client setup
-
-### 6.1 Windows 10/11
-
-- Go to Settings > Bluetooth and devices > Printers and scanners
-- Add printer
-- If auto-discovery fails, add manually with:
-  - http://${HOST_IP}:631/printers/USB-Printer
-
-Samba scans share:
-- \\${HOST_IP}\scans
-
-### 6.2 macOS and iOS
-
-- AirPrint should auto-discover the printer
-- If needed, add IPP printer manually with:
-  - ipp://${HOST_IP}:631/printers/USB-Printer
-
-Samba scans share:
-- smb://${HOST_IP}/scans
-
-### 6.3 Linux
+### 5.4 Linux (CUPS client)
 
 ```bash
 sudo lpadmin -p MyPrinter -E -v ipp://${HOST_IP}:631/printers/USB-Printer -m everywhere
 lpoptions -d MyPrinter
+echo "test" | lp
 ```
 
-NFS share example:
+---
+
+## 6. Scanning
+
+Open `http://${HOST_IP}/` and navigate to **Scan**.
+
+### 6.1 Single page scan
+
+1. Select **Format** (PDF High, JPEG High, PNG, etc.)
+2. Select **Resolution** (300 dpi is a good default)
+3. Select **Color mode** (Color, Grayscale, or Line Art)
+4. Click **Scan** — the file appears in the file list when ready
+5. Click the file name to download
+
+### 6.2 Multi-page PDF (flatbed)
+
+1. Select a PDF format
+2. Check **Multi-page document**
+3. Place the first page on the glass and click **Scan page 1**
+4. When the scan finishes, replace with the next page and click **Scan page 2**
+5. Repeat until all pages are scanned
+6. Click **Finish PDF (N pages)** — the pages are merged into a single PDF
+
+### 6.3 ADF auto-feed
+
+1. Load all pages in the ADF tray
+2. Select **Source: ADF**
+3. Check **Multi-page document**
+4. Click **Scan** — scanservjs feeds all pages automatically
+5. One multi-page PDF is produced
+
+### 6.4 Advanced image filters
+
+Expand the **Advanced** section to enable optional filters applied during scan:
+
+- **Auto-contrast** — normalises contrast range
+- **Auto-levels** — normalises histogram per channel
+- **Threshold** — converts to pure black/white (useful for text documents)
+- **Blur** — light smoothing
+- **More-contrast** — additional contrast boost
+
+### 6.5 OCR formats
+
+Selecting **OCR → PDF** or **OCR → text** runs Tesseract OCR on the scanned image
+and embeds a searchable text layer (requires Tesseract to be installed on the host).
+
+---
+
+## 7. Scan file access
+
+Scanned files are saved to the scans directory on the host (`/scans` in native installs).
+They can be accessed from any device on the network:
+
+| Protocol | Address |
+|---|---|
+| Portal download | `http://${HOST_IP}/` → Scan → file list |
+| Samba (Windows/macOS) | `\\${HOST_IP}\scans` or `smb://${HOST_IP}/scans` |
+| NFS (Linux/macOS) | `${HOST_IP}:/exports/scans` |
+
+---
+
+## 8. Daily operations
+
+### Native install (systemd)
 
 ```bash
-sudo mount -t nfs ${HOST_IP}:/exports/scans /mnt/scans
+systemctl status printershare-portal
+systemctl restart printershare-portal
+journalctl -u printershare-portal -f
+journalctl -u cups -f
+journalctl -u scanservjs -f
+journalctl -u nginx -f
 ```
 
-## 7. Daily operations
-
-Common commands (inside project root):
+### Docker Compose
 
 ```bash
 docker compose ps
@@ -170,119 +233,135 @@ docker compose logs -f ps-cups
 docker compose restart ps-portal
 ```
 
-Useful URLs:
-- Portal dashboard: http://${HOST_IP}/
-- CUPS admin (proxied): http://${HOST_IP}/cups/
-- Scan UI: http://${HOST_IP}/scan/
-- API health: http://${HOST_IP}/api/v1/health
+### Settings
 
-## 8. Backup and upgrade
+Use the portal **Settings** view to change:
+- Portal admin password
+- Cloud backup remotes
+- Tailscale / Cloudflare config
 
-Backup:
+Or edit the env file directly:
+- Native: `/etc/printershare/portal.env`
+- Docker: `.env` in the project root
 
+After changing the env file in native mode, restart the portal:
 ```bash
-./scripts/backup.sh
+systemctl restart printershare-portal
 ```
 
-Upgrade and redeploy:
+---
+
+## 9. Update / redeploy
 
 ```bash
-git pull
 ./scripts/deploy.sh
 ```
 
-No rebuild redeploy:
-
+This runs on the server:
 ```bash
-./scripts/deploy.sh --no-build
+cd /opt/printershare
+git pull --ff-only
+cd portal && npm run build
+rm -rf public && cp -r dist public
+systemctl restart printershare-portal
 ```
 
-## 9. Troubleshooting
+---
 
-### USB device not detected
-
-- Confirm lsusb works inside the LXC container
-- Confirm /dev/bus/usb is mounted in the container
-- Restart container and stack:
+## 10. Backup
 
 ```bash
-pct restart <CTID>
-docker compose down
-docker compose up -d
+./scripts/backup.sh                  # → backups/YYYY-MM-DD_HH-MM-SS.tar.gz
+./scripts/backup.sh --dest /mnt/nas
 ```
 
-### CUPS unavailable
+The backup includes:
+- Scan files (`/scans`)
+- CUPS configuration (`/etc/cups`)
+- Portal env file (`/etc/printershare/portal.env`)
 
-- Check service logs:
+---
+
+## 11. Troubleshooting
+
+### USB device not detected after boot
 
 ```bash
-docker compose logs --tail=200 ps-cups
-docker compose logs --tail=200 ps-nginx
+lsusb | grep -i samsung   # verify USB is visible
+systemctl restart cups
+scanimage -L              # confirm SANE can see the scanner
 ```
 
-- Verify reverse proxy path:
-  - http://${HOST_IP}/cups/
+If still missing: unplug and replug the cable, wait 5 seconds, retry.
 
-### Scanner page unavailable
+### Cannot log in to the portal
 
-- Check scan service logs:
+Check the portal service is running:
+```bash
+systemctl is-active printershare-portal
+curl -s http://127.0.0.1:3000/api/v1/health | python3 -m json.tool
+```
+
+If the password is unknown, reset it by editing `/etc/printershare/portal.env`:
+```ini
+PORTAL_PASS=changeme
+```
+Then restart: `systemctl restart printershare-portal`
+Log in with `changeme` — you will be prompted to set a new password.
+
+### CUPS unavailable at /cups/
 
 ```bash
-docker compose logs --tail=200 ps-scanservjs
+systemctl status cups
+curl -s http://127.0.0.1:631/
 ```
 
-- Verify endpoint:
-  - http://${HOST_IP}/scan/
+### Scan fails or scanner not found
 
-### Print jobs stuck
+```bash
+systemctl status scanservjs
+curl -s http://127.0.0.1:8080/api/v1/context | python3 -m json.tool
+scanimage -L
+```
 
-- Open CUPS queue and clear blocked jobs
-- Verify printer online state and paper/toner status
-- Power cycle printer and re-test from Portal
+If the SANE backend is wrong for your device:
+```bash
+curl http://${HOST_IP}/api/v1/wizard/quirks?vidpid=04e8:344f | python3 -m json.tool
+curl -X POST http://${HOST_IP}/api/v1/wizard/apply-quirks | python3 -m json.tool
+```
 
-### Device-specific driver problems
+### Print jobs stuck in queue
 
-PrinterShare maintains a per-device fix catalogue at
-[`portal/server/data/device-quirks.json`](portal/server/data/device-quirks.json)
-covering known driver gotchas — wrong SANE backend, missing PPDs, ipp-usb
-quirks, etc.
+1. Open `http://${HOST_IP}/cups/` and clear blocked jobs
+2. Power-cycle the printer
+3. Run a test page from the portal **Devices** view
 
-If your device is misbehaving:
+### Device-specific quirks
 
-1. Plug it in, then check what the catalogue knows about it:
+PrinterShare maintains a JSON catalogue of known per-device fixes at
+`portal/server/data/device-quirks.json`. If your device is misbehaving, check what
+the catalogue knows:
 
-   ```bash
-   curl http://${HOST_IP}/api/v1/wizard/quirks?vidpid=04e8:344f | jq .
-   ```
+```bash
+curl "http://${HOST_IP}/api/v1/wizard/quirks?vidpid=$(lsusb | grep -i <brand> | awk '{print tolower($6)}')" | python3 -m json.tool
+```
 
-2. To re-apply the fixes without rebooting (native install only):
+To re-apply fixes without rebooting:
+```bash
+curl -X POST http://${HOST_IP}/api/v1/wizard/apply-quirks
+```
 
-   ```bash
-   curl -X POST http://${HOST_IP}/api/v1/wizard/apply-quirks | jq .
-   # or, on the host:
-   ssh root@${HOST_IP} /opt/printershare/scripts/apply-device-quirks.sh
-   ```
+---
 
-3. If your device isn't in the catalogue, add an entry (see the
-   [Device quirks catalogue](README.md#device-quirks-catalogue) section in
-   the README) and submit a pull request — your fix will benefit every
-   other PrinterShare user with the same device.
+## 12. Security checklist
 
-## 10. Security checklist
+Before sharing the portal on a wider network:
 
-Before production use:
-- Change all default secrets in .env
-- Restrict NFS exports to your actual LAN subnet
-- Restrict management access to trusted LAN/VPN only
-- Keep Proxmox node and container OS updated
-- Keep Docker images updated
+- [ ] Change the default `changeme` password on first login
+- [ ] Set a strong `PORTAL_SECRET` (`openssl rand -hex 32`)
+- [ ] Verify `PORTAL_AUTH=true` in the env file
+- [ ] Restrict NFS exports to your LAN CIDR (`NFS_ALLOWED_SUBNET`)
+- [ ] Keep the host OS and packages up to date (`apt-get upgrade`)
+- [ ] If exposing to the internet, use HTTPS (Cloudflare Tunnel or nginx + Let's Encrypt)
 
-## 11. Quick validation checklist
-
-- USB visible in container (lsusb)
-- All containers healthy (docker compose ps)
-- Portal reachable at http://${HOST_IP}/
-- CUPS reachable at /cups/
-- Scan UI reachable at /scan/
-- Test page prints successfully
-- Test scan saves to shared folder
+See [SECURITY.md](SECURITY.md) for detailed hardening instructions.
