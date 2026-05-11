@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <div class="space-y-3">
     <h3 class="font-semibold text-gray-900">

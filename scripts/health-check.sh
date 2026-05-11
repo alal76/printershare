@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ────────────────────────────────────────────────────────────────
 # health-check.sh — Verify portal and CUPS are responding
 #

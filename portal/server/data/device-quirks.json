@@ -14,12 +14,18 @@
       },
       "scan": {
         "sane_backend": "smfp",
+        "sane_usb_conf": true,
         "sane_blacklist": ["xerox_mfp"],
         "packages": ["suld-driver2-1.00.39"]
       },
+      "apt_repo": {
+        "keyring_url": "https://www.bchemnet.com/suldr/pool/debian/extra/su/suldr-keyring_4_all.deb",
+        "sources_entry": "deb https://www.bchemnet.com/suldr/ debian extra",
+        "sources_file": "suldr.list"
+      },
       "ipp_usb": false,
       "airsane": "ok",
-      "notes": "Samsung ULD (suld-driver2) provides both the PPD and the smfp SANE backend. xerox_mfp also claims this device but its sane_read() returns I/O errors on M-series Samsungs; install.sh must comment xerox_mfp out of /etc/sane.d/dll.conf when smfp.conf is present."
+      "notes": "Samsung ULD (suld-driver2) provides both the PPD and the smfp SANE backend. xerox_mfp also claims this device but its sane_read() returns I/O errors on M-series Samsungs; sane-usb-init.sh comments xerox_mfp out of /etc/sane.d/dll.conf when smfp.conf is present. smfp requires explicit USB ID entries in smfp.conf (sane_usb_conf:true) because it does not enumerate via libusb like hpaio/pixma."
     },
     "04a9:*": {
       "name": "Canon (generic)",

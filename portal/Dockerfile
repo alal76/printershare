@@ -1,3 +1,4 @@
+# Beta test version v1.2.0
 # ── Stage 1: Build Vue frontend ────────────────────────────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app

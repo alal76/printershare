@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 'use strict';
 
 /**
@@ -199,6 +200,128 @@ router.get('/scan-devices', (_req, res) => {
   } catch (err) {
     res.json({ scanners: [], raw: String(err.message) });
   }
+});
+
+/**
+ * GET /api/v1/wizard/discover-network
+ * Discover network-connected printers and scanners via mDNS (avahi-browse).
+ * Returns a list of devices with their IPP URIs so the wizard can present
+ * them for one-click adoption — no IP address entry required.
+ *
+ * Supports both USB-attached devices exposed over the network (IPP-over-USB
+ * via ipp-usb / AirPrint) and standalone network printers/scanners.
+ *
+ * Gracefully returns an empty list if avahi-browse is not installed.
+ */
+router.get('/discover-network', (_req, res) => {
+  const devices = [];
+
+  // avahi-browse in parseable (-p) + terminate-after-browse (-t) + resolve (-r) mode.
+  // Service types: _ipp._tcp  _ipps._tcp (printers), _uscan._tcp  _uscans._tcp (scanners)
+  const avahiArgs = [
+    '-r', '-t', '-p',
+    '_ipp._tcp,_ipps._tcp,_uscan._tcp,_uscans._tcp',
+  ];
+
+  try {
+    const r = spawnSync('avahi-browse', avahiArgs, {
+      timeout: 8000,
+      encoding: 'utf8',
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+
+    // Parseable output line format (= means resolved):
+    // =;eth0;IPv4;HP LaserJet M404n;_ipp._tcp;local;hp.local;192.168.1.5;631;...
+    for (const line of out.split('\n')) {
+      if (!line.startsWith('=')) continue;
+      const parts = line.split(';');
+      if (parts.length < 9) continue;
+      const [, , proto, name, service, , hostname, address, portStr] = parts;
+      if (!address || address === '0.0.0.0' || address === '::1') continue;
+
+      const port    = Number.parseInt(portStr, 10) || 631;
+      const isSecure = service.includes('ipps') || service.includes('uscans');
+      const isScanner = service.includes('uscan');
+      const scheme  = isSecure ? 'ipps' : 'ipp';
+      // Standard CUPS IPP path; most devices respond here for driverless.
+      const uri     = `${scheme}://${address}:${port}/ipp/print`;
+      const kind    = isScanner ? 'scanner' : 'printer';
+
+      devices.push({
+        name:     decodeURIComponent(name.replaceAll(String.raw`\032`, ' ')),
+        service,
+        hostname: hostname.replace(/\.$/, ''),  // strip trailing dot
+        address,
+        port,
+        proto,
+        uri,
+        kind,
+        source:   'mdns',
+      });
+    }
+  } catch {
+    /* avahi-browse not available — return empty list */
+  }
+
+  // Deduplicate by address+port (same device may advertise multiple service types)
+  const seen = new Set();
+  const unique = devices.filter(d => {
+    const key = `${d.address}:${d.port}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  res.json({ devices: unique });
+});
+
+/**
+ * POST /api/v1/wizard/adopt-network-device
+ * Register a network printer (IPP/IPPS) with CUPS using driverless
+ * IPP Everywhere — works for any modern printer advertising _ipp._tcp.
+ * Body: { name: string, uri: string }
+ *
+ * After adding to CUPS, the printer is automatically available via:
+ *  - IPP share (CUPS re-advertises it via Bonjour)
+ *  - Samba share (the scans share is pre-configured at install time)
+ *  - The portal print queue
+ *
+ * Returns { ok, name, uri, message }.
+ */
+const SAFE_WIZARD_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+const SAFE_WIZARD_IPP  = /^ipps?:\/\/[A-Za-z0-9._\-:/]+$/;
+
+router.post('/adopt-network-device', (req, res) => {
+  const { name, uri } = req.body || {};
+
+  if (!name || !SAFE_WIZARD_NAME.test(name)) {
+    return res.status(400).json({ error: 'name must be 1-64 alphanumeric/underscore/hyphen characters' });
+  }
+  if (!uri || !SAFE_WIZARD_IPP.test(uri)) {
+    return res.status(400).json({ error: 'uri must be a valid ipp:// or ipps:// URI' });
+  }
+
+  const { cmd: cupsExec, args: cupsExecArgs } = execIn('ps-cups', [
+    'lpadmin', '-p', name, '-E', '-v', uri,
+    '-m', 'everywhere',
+    '-o', 'printer-is-shared=true',
+  ]);
+
+  const r = spawnSync(cupsExec, cupsExecArgs, { timeout: 20_000, encoding: 'utf8' });
+  if (r.status !== 0) {
+    return res.status(500).json({
+      error: 'lpadmin failed',
+      detail: (r.stderr || r.stdout || `exit ${r.status}`).slice(0, 400),
+    });
+  }
+
+  // Enable + accept the queue so it can receive jobs immediately
+  const { cmd: ena, args: enaArgs } = execIn('ps-cups', ['cupsenable', name]);
+  spawnSync(ena, enaArgs, { timeout: 5_000 });
+  const { cmd: acc, args: accArgs } = execIn('ps-cups', ['cupsaccept', name]);
+  spawnSync(acc, accArgs, { timeout: 5_000 });
+
+  res.json({ ok: true, name, uri, message: `${name} added via IPP Everywhere (driverless)` });
 });
 
 // GET /api/v1/wizard/quirks — return per-device quirks record (driver hints,

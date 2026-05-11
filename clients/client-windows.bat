@@ -1,3 +1,4 @@
+REM Beta test version v1.2.0
 @echo off
 REM ═══════════════════════════════════════════════════════════════════════════
 REM  client-windows.bat  —  Connect a Windows client to printershare

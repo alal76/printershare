@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ============================================================================
 #  printershare — in-LXC installer  (Debian 12)
 # ----------------------------------------------------------------------------
@@ -133,27 +134,67 @@ systemctl restart cups
 # ── Avahi (mDNS/Bonjour for printer + share discovery) ──────────────────────
 systemctl enable --now avahi-daemon
 
-# ── Samsung Unified Linux Driver (ULD) ──────────────────────────────────────
-# Samsung's smfp SANE backend + Samsung PPDs ship via the community
-# bchemnet.com/suldr apt repo (Samsung never published this driver to
-# Debian). We only bootstrap the suldr-keyring + apt source when a
-# Samsung USB device (VID 04e8) is currently attached — keeps the install
-# fast and minimal on hosts that don't need it. The actual ULD packages
-# (e.g. suld-driver2-1.00.39) come from the quirks catalogue further down.
-if lsusb 2>/dev/null | grep -qiE 'ID 04e8:'; then
-    info "Samsung device detected — bootstrapping ULD apt repo"
-    if ! dpkg -s suldr-keyring &>/dev/null; then
-        KEYRING_DEB=$(mktemp --suffix=.deb)
-        if wget -qO "$KEYRING_DEB" https://www.bchemnet.com/suldr/pool/debian/extra/su/suldr-keyring_4_all.deb; then
-            dpkg -i "$KEYRING_DEB" || warn "suldr-keyring install failed"
-        else
-            warn "Could not fetch suldr-keyring .deb — skipping ULD repo"
+# ── Per-device vendor apt repos (driven by device-quirks.json) ─────────────
+# Some devices require vendor-specific apt repositories that are not in the
+# standard Debian archive (e.g. Samsung ULD at bchemnet.com/suldr).
+# The quirks catalogue records these under the `apt_repo` key; we bootstrap
+# only the repos whose devices are currently attached — keeps the install
+# fast and minimal on hosts that don't need them.
+# Adding support for a new vendor repo is a JSON edit (device-quirks.json),
+# not a shell change.
+if command -v jq >/dev/null && [[ -r "$REPO_DIR/portal/server/data/device-quirks.json" ]]; then
+    QCAT="$REPO_DIR/portal/server/data/device-quirks.json"
+    info "Checking for device-specific apt repos (connected USB devices)..."
+    _repo_bootstrapped=0
+    while read -r vid pid; do
+        key="${vid,,}:${pid,,}"
+        vendor="${vid,,}"
+        # Try exact match, then vendor wildcard
+        rec=""
+        for _k in "$key" "${vendor}:*"; do
+            _r=$(jq -c --arg k "$_k" '.devices[$k] // empty' "$QCAT" 2>/dev/null)
+            if [[ -n "$_r" ]]; then rec="$_r"; break; fi
+        done
+        [[ -z "$rec" ]] && continue
+
+        # Read apt_repo fields (empty string → not present)
+        repo_sources_file=$(jq -r '.apt_repo.sources_file  // empty' <<<"$rec")
+        repo_sources_entry=$(jq -r '.apt_repo.sources_entry // empty' <<<"$rec")
+        repo_keyring_url=$(jq  -r '.apt_repo.keyring_url   // empty' <<<"$rec")
+        [[ -z "$repo_sources_file" ]] && continue
+
+        name=$(jq -r '.name // "(unknown)"' <<<"$rec")
+
+        # Idempotent: skip if sources file already exists
+        if [[ -f "/etc/apt/sources.list.d/$repo_sources_file" ]]; then
+            info "$name: apt repo already configured (${repo_sources_file})"
+            continue
         fi
-        rm -f "$KEYRING_DEB"
-    fi
-    if dpkg -s suldr-keyring &>/dev/null && [[ ! -f /etc/apt/sources.list.d/suldr.list ]]; then
-        echo "deb https://www.bchemnet.com/suldr/ debian extra" \
-            >/etc/apt/sources.list.d/suldr.list
+
+        info "$name: bootstrapping apt repo → $repo_sources_entry"
+
+        # Install signing keyring if a keyring deb URL is given
+        if [[ -n "$repo_keyring_url" ]]; then
+            KEYRING_DEB=$(mktemp --suffix=.deb)
+            if wget -qO "$KEYRING_DEB" "$repo_keyring_url"; then
+                dpkg -i "$KEYRING_DEB" || warn "Keyring install failed for $name — repo may not be trusted"
+            else
+                warn "Could not fetch keyring for $name (${repo_keyring_url}) — skipping repo"
+                rm -f "$KEYRING_DEB"
+                continue
+            fi
+            rm -f "$KEYRING_DEB"
+        fi
+
+        echo "$repo_sources_entry" > "/etc/apt/sources.list.d/$repo_sources_file"
+        info "$name: apt repo written to /etc/apt/sources.list.d/$repo_sources_file"
+        _repo_bootstrapped=1
+
+    done < <(lsusb 2>/dev/null \
+        | grep -oE 'ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}' \
+        | awk -F'[: ]' '{print $2, $3}')
+
+    if [[ "$_repo_bootstrapped" -eq 1 ]]; then
         apt-get update -qq || true
     fi
 fi

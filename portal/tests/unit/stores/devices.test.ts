@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 /**
  * Unit tests for the devices Pinia store.
  */

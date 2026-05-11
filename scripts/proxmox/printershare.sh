@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ============================================================================
 #  printershare.sh — Proxmox VE helper (community-scripts/ProxmoxVE style)
 # ----------------------------------------------------------------------------

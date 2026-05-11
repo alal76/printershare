@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <AppShell title="Documents">
     <div class="h-[calc(100vh-8rem)]">

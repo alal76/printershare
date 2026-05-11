@@ -1,4 +1,5 @@
 #!/bin/bash
+# Beta test version v1.2.0
 # CUPS container entrypoint
 # Starts D-Bus, Avahi, then CUPS, then registers IPP Everywhere printers
 set -euo pipefail

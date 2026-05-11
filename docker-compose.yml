@@ -1,3 +1,4 @@
+# Beta test version v1.2.0
 version: "3.8"
 name: printershare
 
@@ -142,6 +143,7 @@ services:
     volumes:
       - ${SCANS_HOST_PATH:-/srv/printershare/scans}:/app/data/output
       - ./scanservjs/config.js:/app/config/config.js:ro
+      - ./portal/server/data/device-quirks.json:/app/device-quirks.json:ro
       - rclone-config:/root/.config/rclone
       # Bind-mount (not `devices:`) so it tolerates an empty /dev/bus/usb at
       # startup; new USB devices appear via the bind mount on hot-plug.

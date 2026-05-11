@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 'use strict';
 
 const crypto = require('node:crypto');

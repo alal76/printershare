@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'

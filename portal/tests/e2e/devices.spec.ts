@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 import { test, expect } from '@playwright/test'
 
 const MOCK_DEVICES = {

@@ -1,3 +1,4 @@
+# Beta test version v1.2.0
 FROM sbs20/scanservjs@sha256:e42263444a8dd5d533ead7d9eb2ef5fd9ca7a4a80569a6f9c14b7a3c21b9c7ca
 
 LABEL description="Scanservjs web scanner UI with AirScan/eSCL support and rclone cloud upload"
@@ -32,10 +33,10 @@ COPY scripts/scan-save-upload.sh /usr/local/bin/scan-save-upload.sh
 RUN chmod 755 /usr/local/bin/scan-save-upload.sh && \
     mkdir -p /app/data/output
 
-# ── Add USB IDs of MFPs not yet in upstream sane-backends ─────────
-# Samsung SCX-3400 Series (xerox_mfp backend) — VID:PID 04e8:344f.
-# Without this entry scanimage -L returns "No scanners found" even
-# though sane-find-scanner detects the device.
-RUN grep -q '0x344f' /etc/sane.d/xerox_mfp.conf || \
-    printf '\n# printershare: Samsung SCX-3400 Series\nusb 0x04e8 0x344f\n' \
-    >> /etc/sane.d/xerox_mfp.conf
+# ── Generic SANE USB backend initialisation ────────────────────────
+# Installs a cont-init.d startup script (s6-overlay) that auto-configures
+# SANE backends at container boot based on whatever USB devices are attached,
+# using the device-quirks.json catalogue (mounted as /app/device-quirks.json).
+# No per-model hardcodes here — add new devices to device-quirks.json instead.
+COPY scripts/sane-usb-init.sh /etc/cont-init.d/01-sane-usb-init
+RUN chmod 755 /etc/cont-init.d/01-sane-usb-init

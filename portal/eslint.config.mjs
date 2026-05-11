@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 import js          from '@eslint/js'
 import tsEslint    from 'typescript-eslint'
 import pluginVue   from 'eslint-plugin-vue'

@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 /**
  * @composable useApi
  * @description Thin wrapper around `fetch` that sets `loading` / `error`

@@ -1,3 +1,4 @@
+# Beta test version v1.2.0
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 

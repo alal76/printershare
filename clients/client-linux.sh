@@ -1,4 +1,5 @@
 #!/bin/bash
+# Beta test version v1.2.0
 # Connect a Linux client to the printershare server.
 # Usage: bash client-linux.sh <SERVER_IP> [usbip|smb|nfs|printer|all]
 set -euo pipefail

@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 // scanservjs v3 user config (config.local.js)
 // Reference: https://github.com/sbs20/scanservjs/blob/master/packages/server/config/config.default.js
 //

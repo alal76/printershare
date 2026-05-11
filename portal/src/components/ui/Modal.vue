@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <Teleport to="body">
     <Transition name="modal">

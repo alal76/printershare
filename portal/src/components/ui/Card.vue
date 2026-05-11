@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <div
     class="bg-white rounded-2xl shadow-sm border border-gray-100"

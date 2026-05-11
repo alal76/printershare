@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <div class="min-h-screen bg-gradient-to-br from-primary-50 to-blue-100 flex items-center justify-center p-4">
     <div class="bg-white rounded-3xl shadow-xl w-full max-w-2xl overflow-hidden">

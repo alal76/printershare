@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <nav class="w-60 flex-col flex-shrink-0 border-r border-gray-100 bg-white p-4 gap-0.5">
     <!-- Logo -->

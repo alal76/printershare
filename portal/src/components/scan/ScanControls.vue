@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <div class="space-y-4">
     <!-- Format + Resolution -->

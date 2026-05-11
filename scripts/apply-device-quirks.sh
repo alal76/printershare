@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ============================================================================
 #  apply-device-quirks.sh — consume portal/server/data/device-quirks.json and
 #  reconcile the host's SANE / CUPS configuration with the recorded fixes for
@@ -12,9 +13,12 @@
 #    1. Enumerate connected USB devices (lsusb).
 #    2. For each VID:PID, look up an entry in the quirks catalogue
 #       (exact match → vendor wildcard → none).
-#    3. Apply `scan.sane_blacklist`: comment out the named SANE backends in
+#    3. Apply `scan.sane_usb_conf`: if true, add the device's USB ID to
+#       the preferred backend's .conf file (for backends that require
+#       explicit USB IDs — e.g. smfp — unlike auto-enumerate backends).
+#    4. Apply `scan.sane_blacklist`: comment out the named SANE backends in
 #       /etc/sane.d/dll.conf when the device's preferred backend is present.
-#    4. Print, one per line, every apt package referenced by matched entries
+#    5. Print, one per line, every apt package referenced by matched entries
 #       so the caller can `xargs apt-get install` them.
 #
 #  Inputs (env vars, all optional):
@@ -103,12 +107,27 @@ while read -r vid pid; do
     matched_count=$((matched_count + 1))
 
     name=$(jq -r '.name // "(unnamed)"' <<<"$rec")
+    preferred=$(jq -r '.scan.sane_backend // empty' <<<"$rec")
     info "matched $key → $name"
+
+    # Apply sane_usb_conf: add explicit USB ID to backend .conf for backends
+    # that do not auto-enumerate via libusb (e.g. smfp). Idempotent.
+    if [[ "$(jq -r '.scan.sane_usb_conf // false' <<<"$rec")" == "true" \
+       && -n "$preferred" && -f "$SANE_DIR/${preferred}.conf" ]]; then
+        if ! grep -q "0x${pid,,}" "$SANE_DIR/${preferred}.conf" 2>/dev/null; then
+            if [[ "$APPLY_BLACKLIST" == "1" ]]; then
+                printf '\n# auto-configured by apply-device-quirks: %s\nusb 0x%s 0x%s\n' \
+                    "$name" "${vid,,}" "${pid,,}" >> "$SANE_DIR/${preferred}.conf"
+                info "added USB ID ${vid,,}:${pid,,} to ${preferred}.conf"
+            else
+                info "would add USB ID ${vid,,}:${pid,,} to ${preferred}.conf (dry-run)"
+            fi
+        fi
+    fi
 
     # Apply sane_blacklist only when the preferred backend is actually present,
     # otherwise we may disable the only working backend on systems without
     # the vendor driver installed.
-    preferred=$(jq -r '.scan.sane_backend // empty' <<<"$rec")
     if [[ -n "$preferred" && -f "$SANE_DIR/${preferred}.conf" ]]; then
         while read -r bl; do
             [[ -n "$bl" ]] && blacklist_backend "$bl"

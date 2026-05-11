@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ps-usb-bind.sh — Called by udev when a USB device is attached.
 # Logs the event; real binding is handled by ipp-usb inside Docker.
 set -euo pipefail

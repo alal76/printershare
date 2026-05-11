@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ────────────────────────────────────────────────────────────────
 # deploy.sh — Pull latest code and restart the Docker Compose stack
 #

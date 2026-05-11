@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <AppShell title="Sharing">
     <div class="max-w-3xl space-y-6">

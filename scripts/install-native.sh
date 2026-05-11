@@ -1,4 +1,5 @@
 #!/bin/bash
+# Beta test version v1.2.0
 # ═══════════════════════════════════════════════════════════════════════════
 # install-native.sh — full bare-metal install on Ubuntu 22.04+  (no Docker)
 #

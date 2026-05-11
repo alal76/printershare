@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <AppShell title="Print">
     <div class="max-w-2xl space-y-6">

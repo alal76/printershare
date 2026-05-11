@@ -1,4 +1,5 @@
 #!/bin/bash
+# Beta test version v1.2.0
 # Called by scanservjs after each scan. Uploads the file to every
 # configured rclone remote (Google Drive, OneDrive).
 #

@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 

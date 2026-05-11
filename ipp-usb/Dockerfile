@@ -1,3 +1,4 @@
+# Beta test version v1.2.0
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive

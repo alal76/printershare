@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <header class="h-14 border-b border-gray-100 bg-white flex items-center justify-between px-4 lg:px-8 flex-shrink-0">
     <h1 class="text-base font-semibold text-gray-900">

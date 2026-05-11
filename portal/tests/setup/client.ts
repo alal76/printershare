@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 /**
  * Client-side test setup.
  * Configures Vue Test Utils global options and Pinia for all store tests.

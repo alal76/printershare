@@ -1,3 +1,4 @@
+# Beta test version v1.2.0
 FROM ubuntu:22.04
 
 LABEL description="CUPS print server with AirPrint/Mopria (IPP Everywhere) for USB printer LAN sharing"

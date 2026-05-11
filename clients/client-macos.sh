@@ -1,4 +1,5 @@
 #!/bin/bash
+# Beta test version v1.2.0
 # Connect a macOS client to the printershare server.
 # Usage: bash client-macos.sh <SERVER_IP> [smb|nfs|printer|usbip|all]
 set -euo pipefail

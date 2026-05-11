@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 /**
  * @composable useConfirm
  * @description Programmatic confirmation dialog composable.  Provides an

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Beta test version v1.2.0
 # Interactive wizard to configure rclone for Google Drive and OneDrive.
 # Run on the server, or inside the container:
 #   docker exec -it ps-scanservjs bash scripts/setup-rclone.sh

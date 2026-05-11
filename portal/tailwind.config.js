@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [

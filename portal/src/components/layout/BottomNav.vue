@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 pb-safe z-40">
     <div class="flex items-center justify-around">

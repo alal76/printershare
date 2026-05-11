@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ═══════════════════════════════════════════════════════════════════════════
 # install-usbip-client.sh
 #

@@ -1,3 +1,4 @@
+// Beta test version v1.2.0
 /**
  * Unit tests for server/routes/scans.js
  *

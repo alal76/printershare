@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Beta test version v1.2.0
 # ────────────────────────────────────────────────────────────────
 # backup.sh — Back up Docker volumes and .env to a timestamped archive
 #

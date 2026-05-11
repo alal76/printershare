@@ -1,3 +1,4 @@
+<!-- Beta test version v1.2.0 -->
 <template>
   <!--
     Renders a step-instruction string that may contain a limited set of
