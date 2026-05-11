@@ -13,11 +13,11 @@
         ></div>
         <!-- Panel -->
         <dialog
-          class="relative bg-white rounded-2xl shadow-xl max-w-lg w-full"
+          class="relative bg-white rounded-2xl shadow-xl max-w-lg w-full flex flex-col max-h-[90dvh]"
           :class="[$attrs.class]"
           open
         >
-          <div class="flex items-start justify-between p-5 border-b border-gray-100">
+          <div class="flex items-start justify-between p-5 border-b border-gray-100 shrink-0">
             <slot name="header">
               <h2 class="text-base font-semibold text-gray-900">
                 {{ title }}
@@ -31,12 +31,12 @@
               <XIcon class="w-5 h-5" />
             </button>
           </div>
-          <div class="p-5">
+          <div class="p-5 overflow-y-auto">
             <slot></slot>
           </div>
           <div
             v-if="$slots.footer"
-            class="px-5 pb-5 flex items-center justify-end gap-2"
+            class="px-5 pb-5 flex items-center justify-end gap-2 shrink-0"
           >
             <slot name="footer"></slot>
           </div>
