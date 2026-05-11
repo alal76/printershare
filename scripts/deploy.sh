@@ -32,21 +32,26 @@ echo "==> Pulling latest changes..."
 git pull --ff-only
 
 echo "==> Building portal assets..."
-(cd portal && npm ci --silent && npm run build)
+(cd portal && npm ci --silent && npm run build && rm -rf public && cp -r dist public)
 
-if [[ "${BUILD}" == "true" ]]; then
-  echo "==> Building Docker images..."
-  docker compose --env-file "${ENV_FILE}" build --parallel
+if command -v docker &>/dev/null; then
+  if [[ "${BUILD}" == "true" ]]; then
+    echo "==> Building Docker images..."
+    docker compose --env-file "${ENV_FILE}" build --parallel
+  fi
+
+  echo "==> Restarting services..."
+  docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
+
+  # Single-file bind mounts (e.g. nginx.conf) are pinned to the inode they had
+  # when the container started.  `git pull` rewrites those files (new inode),
+  # so containers that bind-mount them must be restarted to see the change.
+  echo "==> Restarting containers with bind-mounted config files..."
+  docker compose --env-file "${ENV_FILE}" restart nginx >/dev/null 2>&1 || true
+else
+  echo "==> Native (no Docker): restarting printershare-portal service..."
+  systemctl restart printershare-portal
 fi
-
-echo "==> Restarting services..."
-docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
-
-# Single-file bind mounts (e.g. nginx.conf) are pinned to the inode they had
-# when the container started.  `git pull` rewrites those files (new inode),
-# so containers that bind-mount them must be restarted to see the change.
-echo "==> Restarting containers with bind-mounted config files..."
-docker compose --env-file "${ENV_FILE}" restart nginx >/dev/null 2>&1 || true
 
 echo "==> Waiting for health check..."
 sleep 5
