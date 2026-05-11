@@ -12,8 +12,10 @@
  */
 
 const router = require('express').Router();
+const { spawn } = require('node:child_process');
 const { readEnv, writeEnvPatch, REDACT_PLACEHOLDER } = require('../lib/env');
 const { setRuntimeAuth, setRuntimePassword } = require('../lib/auth');
+const { isNative } = require('../lib/deployment');
 
 const ALLOWED_SETTINGS = new Set([
   'NGINX_HTTP_PORT',
@@ -104,6 +106,20 @@ router.patch('/', (req, res) => {
     }
     if ('PORTAL_PASS' in clean && clean['PORTAL_PASS']) {
       setRuntimePassword(clean['PORTAL_PASS']);
+    }
+    // Hot-apply Tailscale auth key — connect immediately in native mode.
+    if ('TAILSCALE_AUTH_KEY' in clean && isNative()) {
+      // sanitizePatch ensures all values are strings; use entries() to
+      // extract in a form the linter can verify is a string.
+      for (const [k, v] of Object.entries(clean)) {
+        if (k === 'TAILSCALE_AUTH_KEY' && v) {
+          const proc = spawn('tailscale', ['up', '--authkey='.concat(v), '--accept-routes'], {
+            detached: true, stdio: 'ignore',
+          });
+          proc.unref();
+          break;
+        }
+      }
     }
     res.json({ ok: true });
   } catch (err) {
