@@ -76,6 +76,103 @@ function parsePrinterState(detail) {
 }
 
 /**
+ * Parse one line from `lpstat -p -l` output and update the entry.
+ * @param {string} trimmed
+ * @param {{ stateReasons:string[], accepting:boolean, location:string, info:string }} entry
+ */
+function parseLpstatLongLine(trimmed, entry) {
+  const reasonM = /^Printer\s+State\s+Reasons:\s+(.+)$/i.exec(trimmed);
+  if (reasonM) {
+    entry.stateReasons = reasonM[1].split(/[,\s]+/).filter(r => r && r !== 'none');
+    return;
+  }
+  const locationM = /^Location:\s+(.+)$/i.exec(trimmed);
+  if (locationM) { entry.location = locationM[1]; return; }
+  const infoM = /^Description:\s+(.+)$/i.exec(trimmed);
+  if (infoM) { entry.info = infoM[1]; }
+}
+
+/**
+ * Parse `lpstat -p -l` long output to extract rich per-printer state.
+ * Returns a map of printerName -> { stateReasons, accepting, location, info }
+ * @returns {Record<string, {stateReasons:string[], accepting:boolean, location:string, info:string}>}
+ */
+function getRichPrinterInfo() {
+  const result = {};
+  try {
+    const longOut = runCups(['lpstat', '-p', '-l'], 8_000);
+    let currentPrinter = null;
+    for (const raw of longOut.split('\n')) {
+      const printerM = /^printer (\S+)\s/.exec(raw);
+      if (printerM) {
+        currentPrinter = printerM[1];
+        result[currentPrinter] = { stateReasons: [], accepting: true, location: '', info: '' };
+        continue;
+      }
+      if (currentPrinter) parseLpstatLongLine(raw.trim(), result[currentPrinter]);
+    }
+    // lpstat -a: accepting status
+    const acceptOut = runCups(['lpstat', '-a'], 5_000);
+    for (const line of acceptOut.split('\n')) {
+      const m = /^(\S+)\s+(accepting|not accepting)/i.exec(line.trim());
+      if (m && result[m[1]]) {
+        result[m[1]].accepting = m[2].toLowerCase() === 'accepting';
+      }
+    }
+  } catch { /* CUPS unreachable */ }
+  return result;
+}
+
+/**
+ * Get active job counts per printer.
+ * @returns {Record<string, number>}
+ */
+function getJobCounts() {
+  const counts = {};
+  try {
+    const out = runCups(['lpstat', '-W', 'not-completed'], 5_000);
+    for (const line of out.split('\n')) {
+      if (!line.trim()) continue;
+      const m = /^(\S+)-\d+/.exec(line.trim());
+      if (m) counts[m[1]] = (counts[m[1]] || 0) + 1;
+    }
+  } catch { /* ok */ }
+  return counts;
+}
+
+/**
+ * Derive a human-readable status message from CUPS state reasons.
+ * @param {string[]} reasons
+ * @returns {string}
+ */
+function stateReasonToMessage(reasons) {
+  const map = {
+    'media-empty':          'Paper out',
+    'media-low':            'Paper low',
+    'media-jam':            'Paper jam',
+    'toner-empty':          'Toner empty',
+    'toner-low':            'Toner low',
+    'ink-empty':            'Ink empty',
+    'ink-low':              'Ink low',
+    'cover-open':           'Cover open',
+    'door-open':            'Door open',
+    'offline':              'Offline',
+    'offline-report':       'Offline',
+    'other':                'Error',
+    'paused':               'Paused',
+    'sleep':                'Sleeping',
+    'connecting-to-device': 'Connecting',
+    'cups-waiting-for-job-completed': 'Finishing',
+  };
+  for (const r of reasons) {
+    const key = r.replace(/-report$/, '').replace(/-warning$/, '').toLowerCase();
+    if (map[key]) return map[key];
+  }
+  return reasons.length > 0 ? reasons[0] : '';
+}
+
+
+/**
  * Fetch the device URI for a single CUPS printer via lpstat -v.
  * @param {string} name
  * @returns {string}
@@ -114,13 +211,24 @@ router.get('/', (_req, res) => {
   const printers = [];
   try {
     const lpOut    = runCups(['lpstat', '-p'], 5_000);
+    const richInfo = getRichPrinterInfo();
+    const jobCounts = getJobCounts();
     const printerRe = /^printer (\S+)\s+(.+)$/gm;
     let m;
     while ((m = printerRe.exec(lpOut)) !== null) {
+      const name  = m[1];
+      const state = parsePrinterState(m[2]);
+      const rich  = richInfo[name] ?? { stateReasons: [], accepting: true, location: '', info: '' };
       printers.push({
-        name:  m[1],
-        state: parsePrinterState(m[2]),
-        uri:   getPrinterUri(m[1]),
+        name,
+        state,
+        uri:          getPrinterUri(name),
+        accepting:    rich.accepting,
+        stateReasons: rich.stateReasons,
+        statusMsg:    stateReasonToMessage(rich.stateReasons),
+        location:     rich.location,
+        info:         rich.info,
+        jobCount:     jobCounts[name] ?? 0,
       });
     }
   } catch { /* CUPS not available */ }
@@ -386,6 +494,102 @@ router.delete('/printer/:name', (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+/**
+ * POST /api/v1/devices/printer/:name/action
+ * Body: { action: 'enable'|'disable'|'accept'|'reject'|'cancel-jobs'|'resume' }
+ * Performs a CUPS printer management action.
+ */
+router.post('/printer/:name/action', (req, res) => {
+  const { name } = req.params;
+  if (!SAFE_NAME.test(name)) {
+    return res.status(400).json({ error: 'Invalid printer name' });
+  }
+  const { action } = req.body ?? {};
+  const allowed = ['enable', 'disable', 'accept', 'reject', 'cancel-jobs', 'resume'];
+  if (!allowed.includes(action)) {
+    return res.status(400).json({ error: `action must be one of: ${allowed.join(', ')}` });
+  }
+  try {
+    if (action === 'enable' || action === 'resume') {
+      runCups(['cupsenable', name], 10_000);
+      runCups(['cupsaccept', name], 10_000);
+    } else if (action === 'disable') {
+      runCups(['cupsdisable', name], 10_000);
+    } else if (action === 'accept') {
+      runCups(['cupsaccept', name], 10_000);
+    } else if (action === 'reject') {
+      runCups(['cupsreject', name], 10_000);
+    } else if (action === 'cancel-jobs') {
+      runCups(['cancel', '-a', name], 10_000);
+    }
+    res.json({ ok: true, action, name });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 300) });
+  }
+});
+
+/**
+ * GET /api/v1/devices/printer/:name/attributes
+ * Returns all settable printer-lpadmin options for this printer.
+ * Uses `lpoptions -p <name> -l` to enumerate driver options.
+ */
+router.get('/printer/:name/attributes', (req, res) => {
+  const { name } = req.params;
+  if (!SAFE_NAME.test(name)) {
+    return res.status(400).json({ error: 'Invalid printer name' });
+  }
+  try {
+    const out = runCups(['lpoptions', '-p', name, '-l'], 15_000);
+    const options = [];
+    for (const line of out.split('\n')) {
+      // Format: OptionName/Label: *Default value1 value2 ...
+      const m = /^([A-Za-z0-9_-]+)\/([^:]*?):\s*(.+)$/.exec(line.trim());
+      if (!m) continue;
+      const rawValues = m[3].split(/\s+/);
+      const values = [];
+      let current = null;
+      for (const v of rawValues) {
+        if (v.startsWith('*')) {
+          current = v.slice(1);
+          values.push({ value: current, label: current, current: true });
+        } else {
+          values.push({ value: v, label: v, current: false });
+        }
+      }
+      options.push({ key: m[1], label: m[2] || m[1], values, current });
+    }
+    res.json({ options });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 300) });
+  }
+});
+
+/**
+ * POST /api/v1/devices/printer/:name/option
+ * Body: { key: string, value: string }
+ * Sets a printer option via `lpadmin -o key=value`.
+ */
+router.post('/printer/:name/option', (req, res) => {
+  const { name } = req.params;
+  if (!SAFE_NAME.test(name)) {
+    return res.status(400).json({ error: 'Invalid printer name' });
+  }
+  const { key, value } = req.body ?? {};
+  // Restrict key/value to safe characters only
+  if (!key || !/^[A-Za-z0-9_-]{1,64}$/.test(key)) {
+    return res.status(400).json({ error: 'Invalid option key' });
+  }
+  if (value === undefined || value === null || !/^[A-Za-z0-9_.@, -]{0,128}$/.test(String(value))) {
+    return res.status(400).json({ error: 'Invalid option value' });
+  }
+  try {
+    runCups(['lpadmin', '-p', name, '-o', `${key}=${String(value)}`], 10_000);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 300) });
   }
 });
 

@@ -3,8 +3,13 @@
 
 const crypto = require('node:crypto');
 
-// Auth is ENABLED by default. Set PORTAL_AUTH=false only on isolated LANs.
-const AUTH_ENABLED = String(process.env.PORTAL_AUTH ?? 'true').toLowerCase() === 'true';
+// Auth is DISABLED by default. Set PORTAL_AUTH=true to require login.
+let _authEnabled = String(process.env.PORTAL_AUTH ?? 'false').toLowerCase() === 'true';
+
+/** Toggle login enforcement at runtime (no restart needed). */
+function setRuntimeAuth(enabled) {
+  _authEnabled = Boolean(enabled);
+}
 const AUTH_USER = process.env.PORTAL_USER || 'admin';
 const DEFAULT_PASS = 'changeme';
 // Runtime-mutable so a change-password call takes effect without a restart.
@@ -88,12 +93,13 @@ function verifyCredentials(username, password) {
 }
 
 module.exports = {
-  AUTH_ENABLED,
+  get AUTH_ENABLED() { return _authEnabled; },
   AUTH_USER,
   get AUTH_PASS() { return AUTH_PASS; },
   SESSION_TTL_SECONDS,
   isDefaultPassword,
   setRuntimePassword,
+  setRuntimeAuth,
   createSessionToken,
   verifySessionToken,
   readSessionToken,

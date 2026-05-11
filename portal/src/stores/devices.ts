@@ -20,9 +20,24 @@ export interface UsbDevice {
 }
 
 export interface CupsPrinter {
-  name:  string
-  state: 'idle' | 'busy' | 'disabled' | 'unknown'
-  uri:   string
+  name:         string
+  state:        'idle' | 'busy' | 'disabled' | 'unknown'
+  uri:          string
+  accepting:    boolean
+  stateReasons: string[]
+  statusMsg:    string
+  location:     string
+  info:         string
+  jobCount:     number
+}
+
+export type PrinterAction = 'enable' | 'disable' | 'accept' | 'reject' | 'cancel-jobs' | 'resume'
+
+export interface PrinterOption {
+  key:     string
+  label:   string
+  current: string | null
+  values:  { value: string; label: string; current: boolean }[]
 }
 
 export interface SaneScanner {
@@ -110,6 +125,9 @@ export const useDevicesStore = defineStore('devices', () => {
     usb, printers, scanners, loading, error,
     fetchDevices, addPrinter, autoAddPrinter, removePrinter,
     resetAll, testPrint: testPrintDevice,
+    printerAction: printerActionFn,
+    fetchPrinterAttributes: fetchPrinterAttributesFn,
+    setPrinterOption: setPrinterOptionFn,
   }
 })
 
@@ -127,4 +145,38 @@ export async function testPrintDevice(name: string): Promise<string> {
   }
   const data = await r.json() as { message?: string }
   return data.message ?? 'Test page sent'
+}
+
+export async function printerActionFn(name: string, action: PrinterAction): Promise<void> {
+  const r = await fetch(`/api/v1/devices/printer/${encodeURIComponent(name)}/action`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ action }),
+  })
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+    throw new Error((e as { error?: string }).error ?? 'Action failed')
+  }
+}
+
+export async function fetchPrinterAttributesFn(name: string): Promise<PrinterOption[]> {
+  const r = await fetch(`/api/v1/devices/printer/${encodeURIComponent(name)}/attributes`)
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+    throw new Error((e as { error?: string }).error ?? 'Could not load attributes')
+  }
+  const data = await r.json() as { options?: PrinterOption[] }
+  return data.options ?? []
+}
+
+export async function setPrinterOptionFn(name: string, key: string, value: string): Promise<void> {
+  const r = await fetch(`/api/v1/devices/printer/${encodeURIComponent(name)}/option`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ key, value }),
+  })
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+    throw new Error((e as { error?: string }).error ?? 'Could not set option')
+  }
 }

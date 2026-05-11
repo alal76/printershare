@@ -12,7 +12,8 @@
  */
 
 const router = require('express').Router();
-const { readEnv, writeEnvPatch } = require('../lib/env');
+const { readEnv, writeEnvPatch, REDACT_PLACEHOLDER } = require('../lib/env');
+const { setRuntimeAuth, setRuntimePassword } = require('../lib/auth');
 
 const ALLOWED_SETTINGS = new Set([
   'NGINX_HTTP_PORT',
@@ -25,6 +26,8 @@ const ALLOWED_SETTINGS = new Set([
   'NFS_ALLOWED_SUBNET',
   'PORTAL_SECRET',
   'PORTAL_AUTH',
+  'PORTAL_PASS',
+  'PORTAL_USER',
   'TAILSCALE_AUTH_KEY',
   'CLOUDFLARE_TUNNEL_TOKEN',
   'COMPOSE_PROFILES',
@@ -43,6 +46,18 @@ function isValidCidr(raw) {
   return /^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/.test(String(raw));
 }
 
+function validateValue(key, val) {
+  if (key.endsWith('_PORT') && !isValidPort(val)) {
+    throw new Error(`Invalid port for ${key}`);
+  }
+  if (key === 'NFS_ALLOWED_SUBNET' && val && !isValidCidr(val)) {
+    throw new Error('Invalid NFS_ALLOWED_SUBNET (expected CIDR)');
+  }
+  if (key === 'PORTAL_PASS' && val && val.length < 8) {
+    throw new Error('PORTAL_PASS must be at least 8 characters');
+  }
+}
+
 function sanitizePatch(patch) {
   const clean = {};
   for (const [key, value] of Object.entries(patch)) {
@@ -50,12 +65,10 @@ function sanitizePatch(patch) {
     if (typeof value !== 'string' && typeof value !== 'number') continue;
 
     const val = String(value);
-    if (key.endsWith('_PORT') && !isValidPort(val)) {
-      throw new Error(`Invalid port for ${key}`);
-    }
-    if (key === 'NFS_ALLOWED_SUBNET' && val && !isValidCidr(val)) {
-      throw new Error('Invalid NFS_ALLOWED_SUBNET (expected CIDR)');
-    }
+    // Never write the redacted placeholder back — it means the client loaded
+    // the value as a secret, didn't change it, and is sending the sentinel.
+    if (val === REDACT_PLACEHOLDER) continue;
+    validateValue(key, val);
     clean[key] = val;
   }
   return clean;
@@ -85,6 +98,13 @@ router.patch('/', (req, res) => {
       return res.status(400).json({ error: 'No valid settings provided' });
     }
     writeEnvPatch(clean);
+    // Hot-apply auth changes without requiring a restart.
+    if ('PORTAL_AUTH' in clean) {
+      setRuntimeAuth(clean['PORTAL_AUTH'] === 'true');
+    }
+    if ('PORTAL_PASS' in clean && clean['PORTAL_PASS']) {
+      setRuntimePassword(clean['PORTAL_PASS']);
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: String(err.message) });

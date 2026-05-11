@@ -28,7 +28,95 @@
         @update:patch="patch = $event"
       />
 
-      <!-- ── Security ────────────────────────────────────────────────────── -->
+      <!-- ── Admin Access ────────────────────────────────────────────────── -->
+      <Card>
+        <div class="flex items-center gap-3 mb-5">
+          <div class="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center flex-shrink-0">
+            <LockIcon class="w-4 h-4 text-orange-600" />
+          </div>
+          <div>
+            <h2 class="text-sm font-semibold text-gray-900">
+              Admin Access
+            </h2>
+            <p class="text-xs text-gray-500">
+              Require a login to access this portal.
+            </p>
+          </div>
+        </div>
+
+        <!-- Auth toggle -->
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <p class="text-sm font-medium text-gray-800">
+              Require login
+            </p>
+            <p class="text-xs text-gray-500 mt-0.5">
+              When enabled, visitors must log in with username &amp; password.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="authEnabled"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500"
+            :class="authEnabled ? 'bg-primary-600' : 'bg-gray-200'"
+            :disabled="savingAuth"
+            @click="toggleAuth"
+          >
+            <span
+              class="inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform"
+              :class="authEnabled ? 'translate-x-6' : 'translate-x-1'"
+            ></span>
+          </button>
+        </div>
+
+        <!-- Change password (only when auth enabled) -->
+        <template v-if="authEnabled">
+          <div class="border-t border-gray-100 pt-4 space-y-3">
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Change Admin Password
+            </p>
+            <div>
+              <label
+                for="admin-user"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >Username</label>
+              <input
+                id="admin-user"
+                v-model="adminUser"
+                type="text"
+                autocomplete="username"
+                placeholder="admin"
+                class="w-full rounded-xl border-gray-200 text-sm"
+              />
+            </div>
+            <div>
+              <label
+                for="admin-pass"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >New Password</label>
+              <input
+                id="admin-pass"
+                v-model="adminPass"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Min 8 characters"
+                class="w-full rounded-xl border-gray-200 text-sm"
+              />
+            </div>
+            <Button
+              size="sm"
+              :loading="savingAdmin"
+              :disabled="!adminPass || adminPass.length < 8"
+              @click="saveAdmin"
+            >
+              Save Credentials
+            </Button>
+          </div>
+        </template>
+      </Card>
+
+      <!-- ── Security & Passwords ────────────────────────────────────────── -->
       <SettingsSection
         title="Security & Passwords"
         description="Credentials used by this service. Values are stored in the .env file."
@@ -132,7 +220,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter }      from 'vue-router'
-import { RefreshCwIcon, Loader2Icon, WandIcon } from 'lucide-vue-next'
+import { RefreshCwIcon, Loader2Icon, WandIcon, LockIcon } from 'lucide-vue-next'
 import AppShell from '@/components/layout/AppShell.vue'
 import Card     from '@/components/ui/Card.vue'
 import Button   from '@/components/ui/Button.vue'
@@ -148,6 +236,13 @@ const loading    = ref(false)
 const savingGroup = ref<string | null>(null)
 const patch      = ref<Record<string, string>>({})
 const restarting = ref<string | null>(null)
+
+// ── Admin access ───────────────────────────────────────────────────────────
+const authEnabled  = ref(false)
+const savingAuth   = ref(false)
+const adminUser    = ref('')
+const adminPass    = ref('')
+const savingAdmin  = ref(false)
 
 // ── Field group definitions ────────────────────────────────────────────────
 interface Field { key: string; label: string; placeholder?: string; secret?: boolean; hint?: string }
@@ -189,6 +284,8 @@ onMounted(async () => {
     const r = await fetch('/api/v1/settings')
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     patch.value = await r.json() as Record<string, string>
+    authEnabled.value = (patch.value['PORTAL_AUTH'] ?? 'false').toLowerCase() === 'true'
+    adminUser.value   = patch.value['PORTAL_USER'] ?? ''
   } catch {
     toast.error('Could not load settings')
   } finally {
@@ -196,14 +293,59 @@ onMounted(async () => {
   }
 })
 
+// ── Auth toggle ────────────────────────────────────────────────────────────
+async function toggleAuth() {
+  savingAuth.value = true
+  const next = !authEnabled.value
+  try {
+    const r = await fetch('/api/v1/settings', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ PORTAL_AUTH: next ? 'true' : 'false' }),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    authEnabled.value = next
+    toast.success(next ? 'Login required' : 'Login disabled')
+  } catch (err) {
+    toast.error('Could not update auth', err instanceof Error ? err.message : String(err))
+  } finally {
+    savingAuth.value = false
+  }
+}
+
+// ── Save admin credentials ─────────────────────────────────────────────────
+async function saveAdmin() {
+  savingAdmin.value = true
+  try {
+    const body: Record<string, string> = { PORTAL_PASS: adminPass.value }
+    if (adminUser.value.trim()) body['PORTAL_USER'] = adminUser.value.trim()
+    const r = await fetch('/api/v1/settings', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    adminPass.value = ''
+    toast.success('Credentials saved')
+  } catch (err) {
+    toast.error('Save failed', err instanceof Error ? err.message : String(err))
+  } finally {
+    savingAdmin.value = false
+  }
+}
+
 // ── Save a group of fields ─────────────────────────────────────────────────
 async function saveGroup(groupName: string, fields: Field[]) {
   savingGroup.value = groupName
+  const REDACT = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' // ••••••••
   const groupPatch: Record<string, string> = {}
   for (const f of fields) {
-    if (patch.value[f.key] !== undefined) {
-      groupPatch[f.key] = patch.value[f.key]
-    }
+    const v = patch.value[f.key]
+    if (v === undefined) continue
+    // Don't send the server-side redact placeholder back — it means the user
+    // hasn't touched this secret field, so leave the stored value alone.
+    if (f.secret && v === REDACT) continue
+    groupPatch[f.key] = v
   }
   try {
     const r = await fetch('/api/v1/settings', {

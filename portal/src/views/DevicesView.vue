@@ -76,34 +76,71 @@
             :key="p.name"
             :padding="false"
           >
+            <!-- Main row -->
             <div class="flex items-center gap-4 p-4">
               <!-- Status icon -->
               <div
                 class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                :class="printerIconBg(p.state)"
+                :class="printerIconBg(p)"
               >
                 <PrinterIcon
                   class="w-5 h-5"
-                  :class="printerIconColor(p.state)"
+                  :class="printerIconColor(p)"
                 />
               </div>
 
               <!-- Info -->
               <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="text-sm font-semibold text-gray-900 truncate">{{ p.name }}</span>
                   <StatusBadge
-                    :status="printerStatus(p.state)"
-                    :label="p.state"
+                    :status="printerStatus(p)"
+                    :label="printerLabel(p)"
                   />
+                  <span
+                    v-if="p.jobCount > 0"
+                    class="text-xs text-blue-600 font-medium"
+                  >{{ p.jobCount }} job{{ p.jobCount !== 1 ? 's' : '' }}</span>
                 </div>
-                <p class="text-xs text-gray-400 truncate mt-0.5">
-                  {{ p.uri || 'No URI' }}
+                <p
+                  v-if="p.statusMsg"
+                  class="text-xs text-amber-600 font-medium mt-0.5"
+                >
+                  ⚠ {{ p.statusMsg }}
+                </p>
+                <p
+                  v-else
+                  class="text-xs text-gray-400 truncate mt-0.5"
+                >
+                  {{ p.info || p.uri || 'No URI' }}
                 </p>
               </div>
 
               <!-- Actions -->
-              <div class="flex items-center gap-2 flex-shrink-0">
+              <div class="flex items-center gap-1 flex-shrink-0">
+                <!-- Resume / enable button when paused or disabled -->
+                <Button
+                  v-if="p.state === 'disabled' || p.stateReasons.some(r => r.includes('paused'))"
+                  variant="primary"
+                  size="sm"
+                  :loading="actionLoading === p.name + ':resume'"
+                  title="Resume printing"
+                  @click="onPrinterAction(p.name, 'resume')"
+                >
+                  <PlayIcon class="w-3.5 h-3.5" />
+                  Resume
+                </Button>
+                <!-- Pause button when idle/busy -->
+                <Button
+                  v-else-if="p.state === 'idle' || p.state === 'busy'"
+                  variant="ghost"
+                  size="sm"
+                  :loading="actionLoading === p.name + ':disable'"
+                  title="Pause printing"
+                  @click="onPrinterAction(p.name, 'disable')"
+                >
+                  <PauseIcon class="w-3.5 h-3.5" />
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -113,6 +150,15 @@
                   <FileCheckIcon class="w-3.5 h-3.5" />
                   Test
                 </Button>
+                <!-- Settings gear -->
+                <button
+                  type="button"
+                  class="p-2 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition-colors"
+                  title="Printer settings"
+                  @click="openPrinterSettings(p.name)"
+                >
+                  <SettingsIcon class="w-4 h-4" />
+                </button>
                 <button
                   type="button"
                   class="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
@@ -120,6 +166,42 @@
                   @click="onRemovePrinter(p.name)"
                 >
                   <Trash2Icon class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <!-- Expanded state reasons (paper out etc.) -->
+            <div
+              v-if="p.stateReasons.length > 0 || !p.accepting"
+              class="border-t border-gray-100 px-4 py-2 flex items-center gap-4 bg-amber-50 rounded-b-2xl"
+            >
+              <span class="text-xs text-amber-700 flex-1">
+                <span
+                  v-if="!p.accepting"
+                  class="mr-3"
+                >⊘ Not accepting jobs</span>
+                <span
+                  v-for="r in p.stateReasons"
+                  :key="r"
+                  class="mr-2 inline-block"
+                >{{ r }}</span>
+              </span>
+              <div class="flex gap-2">
+                <button
+                  v-if="!p.accepting"
+                  type="button"
+                  class="text-xs text-blue-600 hover:underline"
+                  @click="onPrinterAction(p.name, 'accept')"
+                >
+                  Accept jobs
+                </button>
+                <button
+                  v-if="p.jobCount > 0"
+                  type="button"
+                  class="text-xs text-red-600 hover:underline"
+                  @click="onPrinterAction(p.name, 'cancel-jobs')"
+                >
+                  Cancel all jobs
                 </button>
               </div>
             </div>
@@ -307,6 +389,118 @@
       </Card>
     </div>
 
+    <!-- ── Printer Settings Modal ─────────────────────────────────────── -->
+    <Modal
+      v-model="showPrinterSettings"
+      :title="`Settings — ${settingsPrinterName}`"
+    >
+      <div class="space-y-4">
+        <!-- Actions -->
+        <div>
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Queue Actions
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              @click="onPrinterAction(settingsPrinterName, 'enable')"
+            >
+              Enable
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              @click="onPrinterAction(settingsPrinterName, 'disable')"
+            >
+              Pause
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              @click="onPrinterAction(settingsPrinterName, 'accept')"
+            >
+              Accept Jobs
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              @click="onPrinterAction(settingsPrinterName, 'reject')"
+            >
+              Reject Jobs
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              class="text-red-600"
+              @click="onPrinterAction(settingsPrinterName, 'cancel-jobs')"
+            >
+              Cancel All Jobs
+            </Button>
+          </div>
+        </div>
+
+        <!-- Driver options -->
+        <div>
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Driver Options
+          </p>
+          <div
+            v-if="loadingAttributes"
+            class="space-y-2"
+          >
+            <div
+              v-for="i in 3"
+              :key="i"
+              class="h-12 bg-gray-100 rounded-xl animate-pulse"
+            ></div>
+          </div>
+          <p
+            v-else-if="printerOptions.length === 0"
+            class="text-sm text-gray-400"
+          >
+            No configurable options reported by this driver.
+          </p>
+          <div
+            v-else
+            class="space-y-3"
+          >
+            <div
+              v-for="opt in printerOptions"
+              :key="opt.key"
+            >
+              <label
+                :for="`opt-${opt.key}`"
+                class="block text-xs font-medium text-gray-700 mb-1"
+              >{{ opt.label }}</label>
+              <select
+                :id="`opt-${opt.key}`"
+                class="w-full rounded-xl border-gray-200 text-sm"
+                :value="opt.current ?? ''"
+                @change="onOptionChange(opt.key, ($event.target as HTMLSelectElement).value)"
+              >
+                <option
+                  v-for="v in opt.values"
+                  :key="v.value"
+                  :value="v.value"
+                >
+                  {{ v.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <Button
+          variant="ghost"
+          @click="showPrinterSettings = false"
+        >
+          Close
+        </Button>
+      </template>
+    </Modal>
+
     <!-- ── Add Printer Modal ───────────────────────────────────────────── -->
     <Modal
       v-model="showAddPrinter"
@@ -387,14 +581,15 @@ import {
   PrinterIcon, ScanIcon, UsbIcon, RefreshCwIcon, PlusIcon,
   Trash2Icon, FileCheckIcon, WifiIcon, CopyIcon,
   SmartphoneIcon, MonitorIcon, AppleIcon, RotateCcwIcon,
+  PlayIcon, PauseIcon, SettingsIcon,
 } from 'lucide-vue-next'
 import AppShell   from '@/components/layout/AppShell.vue'
 import Card       from '@/components/ui/Card.vue'
 import Button     from '@/components/ui/Button.vue'
 import Modal      from '@/components/ui/Modal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
-import { useDevicesStore, testPrintDevice } from '@/stores/devices'
-import type { UsbDevice } from '@/stores/devices'
+import { useDevicesStore, testPrintDevice, printerActionFn, fetchPrinterAttributesFn, setPrinterOptionFn } from '@/stores/devices'
+import type { UsbDevice, CupsPrinter, PrinterOption } from '@/stores/devices'
 import { useToastStore }  from '@/stores/toast'
 import { RouterLink } from 'vue-router'
 
@@ -410,6 +605,36 @@ const addingPrinter   = ref(false)
 const testingPrinter  = ref<string | null>(null)
 const autoAdding      = ref<string | null>(null)
 const resetting       = ref(false)
+const actionLoading   = ref<string | null>(null)
+
+// Printer settings modal
+const showPrinterSettings  = ref(false)
+const settingsPrinterName  = ref('')
+const printerOptions       = ref<PrinterOption[]>([])
+const loadingAttributes    = ref(false)
+
+async function openPrinterSettings(name: string) {
+  settingsPrinterName.value = name
+  printerOptions.value      = []
+  showPrinterSettings.value = true
+  loadingAttributes.value   = true
+  try {
+    printerOptions.value = await fetchPrinterAttributesFn(name)
+  } catch {
+    // Options not available for this driver — show empty state
+  } finally {
+    loadingAttributes.value = false
+  }
+}
+
+async function onOptionChange(key: string, value: string) {
+  try {
+    await setPrinterOptionFn(settingsPrinterName.value, key, value)
+    toast.success('Option saved')
+  } catch (err) {
+    toast.error('Could not set option', err instanceof Error ? err.message : String(err))
+  }
+}
 
 onMounted(() => devices.fetchDevices())
 
@@ -455,23 +680,52 @@ async function onReset() {
   }
 }
 
-function printerStatus(state: string): SvcStatus {
-  if (state === 'idle')     return 'ok'
-  if (state === 'busy')     return 'pending'
-  if (state === 'disabled') return 'offline'
+function printerStatus(p: CupsPrinter): SvcStatus {
+  if (p.stateReasons.some(r => /media.empty|jam|toner.empty|ink.empty|cover.open|door.open/i.test(r))) return 'error'
+  if (p.stateReasons.some(r => /media.low|toner.low|ink.low/i.test(r))) return 'warning'
+  if (p.state === 'idle')     return 'ok'
+  if (p.state === 'busy')     return 'pending'
+  if (p.state === 'disabled') return 'offline'
   return 'unknown'
 }
-function printerIconBg(state: string) {
-  if (state === 'idle')     return 'bg-green-50'
-  if (state === 'busy')     return 'bg-blue-50'
-  if (state === 'disabled') return 'bg-gray-100'
+
+function printerLabel(p: CupsPrinter): string {
+  if (p.statusMsg) return p.statusMsg
+  if (p.state === 'disabled') return 'Paused'
+  return p.state
+}
+
+function printerIconBg(p: CupsPrinter) {
+  const s = printerStatus(p)
+  if (s === 'error')   return 'bg-red-50'
+  if (s === 'warning') return 'bg-amber-50'
+  if (p.state === 'idle')     return 'bg-green-50'
+  if (p.state === 'busy')     return 'bg-blue-50'
+  if (p.state === 'disabled') return 'bg-gray-100'
   return 'bg-gray-100'
 }
-function printerIconColor(state: string) {
-  if (state === 'idle')     return 'text-green-600'
-  if (state === 'busy')     return 'text-blue-600'
-  if (state === 'disabled') return 'text-gray-400'
+function printerIconColor(p: CupsPrinter) {
+  const s = printerStatus(p)
+  if (s === 'error')   return 'text-red-500'
+  if (s === 'warning') return 'text-amber-500'
+  if (p.state === 'idle')     return 'text-green-600'
+  if (p.state === 'busy')     return 'text-blue-600'
+  if (p.state === 'disabled') return 'text-gray-400'
   return 'text-gray-400'
+}
+
+async function onPrinterAction(name: string, action: string) {
+  const key = `${name}:${action}`
+  actionLoading.value = key
+  try {
+    await printerActionFn(name, action as import('@/stores/devices').PrinterAction)
+    toast.success('Done', `${action} applied to ${name}`)
+    await devices.fetchDevices()
+  } catch (err) {
+    toast.error('Action failed', err instanceof Error ? err.message : String(err))
+  } finally {
+    if (actionLoading.value === key) actionLoading.value = null
+  }
 }
 
 async function onAddPrinter() {
