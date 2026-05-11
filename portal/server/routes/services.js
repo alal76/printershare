@@ -96,6 +96,13 @@ function installComponent(name) {
   }
 }
 
+/** Returns true when the process is running inside an LXC container. */
+function isLxc() {
+  try { return fs.readFileSync('/proc/1/environ', 'utf8').includes('container=lxc'); } catch { /* ignore */ }
+  try { return fs.existsSync('/run/systemd/container'); } catch { /* ignore */ }
+  return false;
+}
+
 function installTailscale() {
   const { id, codename } = getOsRelease();
   const gpgPath  = '/usr/share/keyrings/tailscale-archive-keyring.gpg';
@@ -104,6 +111,17 @@ function installTailscale() {
   runCmd('curl', ['-fsSL', `https://pkgs.tailscale.com/stable/${id}/${codename}.tailscale-keyring.list`, '-o', listPath], 30_000);
   runCmd('apt-get', ['update', '-qq'], 60_000);
   runCmd('apt-get', ['install', '-y', '--no-install-recommends', 'tailscale'], 300_000);
+  // LXC containers lack /dev/net/tun; switch to userspace networking
+  const needsUserspace = isLxc() || !fs.existsSync('/dev/net/tun');
+  if (needsUserspace) {
+    const overrideDir = '/etc/systemd/system/tailscaled.service.d';
+    fs.mkdirSync(overrideDir, { recursive: true });
+    fs.writeFileSync(`${overrideDir}/lxc-userspace.conf`,
+      '[Service]\nExecStart=\nExecStart=/usr/sbin/tailscaled --tun=userspace-networking' +
+      ' --state=/var/lib/tailscale/tailscaled.state' +
+      ' --socket=/run/tailscale/tailscaled.sock --port=41641\n');
+    runCmd('systemctl', ['daemon-reload'], 5_000);
+  }
   runCmd('systemctl', ['enable', '--now', 'tailscaled'], 10_000);
   // Connect if auth key is already configured
   const dotenvPath = process.env.DOTENV_PATH || '/etc/printershare/portal.env';

@@ -65,6 +65,7 @@
         <template v-if="system.health">
           <div
             v-for="(svc, name) in system.health.services"
+            v-show="svc.status !== 'disabled'"
             :key="name"
             :data-testid="`service-${name}`"
             class="bg-white rounded-2xl border p-4 flex items-center gap-3 transition-colors"
