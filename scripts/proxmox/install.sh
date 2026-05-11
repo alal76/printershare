@@ -498,6 +498,39 @@ else
     warn "NFS kernel module unavailable — skipping NFS export"
 fi
 
+# ── Tailscale (optional remote access) ──────────────────────────────────────
+# Install and enable tailscale if either:
+#   a) TAILSCALE_AUTH_KEY is pre-set in the environment
+#   b) The caller explicitly requests it via INSTALL_TAILSCALE=1
+INSTALL_TAILSCALE="${INSTALL_TAILSCALE:-0}"
+_ENVFILE=/etc/printershare/portal.env
+_TS_KEY="${TAILSCALE_AUTH_KEY:-$(grep '^TAILSCALE_AUTH_KEY=' "$_ENVFILE" 2>/dev/null | cut -d= -f2-)}"
+[[ -n "$_TS_KEY" ]] && INSTALL_TAILSCALE=1
+
+if [[ "$INSTALL_TAILSCALE" == "1" ]] && ! command -v tailscale >/dev/null; then
+    info "Installing Tailscale"
+    # Source distro info
+    . /etc/os-release
+    _TS_CODENAME="${VERSION_CODENAME:-bookworm}"
+    curl -fsSL "https://pkgs.tailscale.com/stable/${ID}/${_TS_CODENAME}.noarmor.gpg" \
+        -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+    curl -fsSL "https://pkgs.tailscale.com/stable/${ID}/${_TS_CODENAME}.tailscale-keyring.list" \
+        -o /etc/apt/sources.list.d/tailscale.list
+    apt-get update -qq
+    apt-get install -y --no-install-recommends tailscale
+    systemctl enable --now tailscaled
+    if [[ -n "$_TS_KEY" ]]; then
+        tailscale up --authkey="$_TS_KEY" --accept-routes || warn "tailscale up failed — check key"
+    fi
+    # Store the key in the portal env if it came from the environment
+    if [[ -n "${TAILSCALE_AUTH_KEY:-}" ]]; then
+        grep -q '^TAILSCALE_AUTH_KEY=' "$_ENVFILE" 2>/dev/null || \
+            echo "TAILSCALE_AUTH_KEY=${TAILSCALE_AUTH_KEY}" >> "$_ENVFILE"
+    fi
+elif command -v tailscale >/dev/null; then
+    info "Tailscale already installed: $(tailscale version 2>/dev/null | head -1)"
+fi
+
 # ── Enable + (re)start the new units ────────────────────────────────────────
 systemctl daemon-reload
 systemctl enable --now scanservjs.service

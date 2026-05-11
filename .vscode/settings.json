@@ -1,1 +1,6 @@
-{}
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "alal76",
+        "projectKey": "alal76_crm-solution"
+    }
+}

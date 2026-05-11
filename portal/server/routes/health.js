@@ -101,6 +101,10 @@ router.get('/', async (_req, res) => {
   const remoteEnabled = profiles.has('remote');
   const nfsEnabled    = profiles.has('nfs');
 
+  // In native mode, whether a service is "present" is determined by whether
+  // its systemd unit is enabled — Docker Compose profiles don't apply.
+  const native = isNative();
+
   const [cups, scanservjs, paperless] = await Promise.all([
     probe(`http://${CUPS_HOST}:${CUPS_PORT}/`),
     probe(`${SCANSERVJS_INTERNAL}/api/v1/context`),
@@ -113,13 +117,20 @@ router.get('/', async (_req, res) => {
     scanservjs: { status: scanservjs.ok ? 'ok' : 'error', latency_ms: scanservjs.latency_ms, message: scanservjs.message },
     paperless:  serviceStatus(docsEnabled,   paperless.ok, paperless.latency_ms),
     samba:      serviceStatus(serviceConfigured('samba'), serviceRunning('samba')),
-    nfs:        serviceStatus(nfsEnabled && serviceConfigured('nfs'), serviceRunning('nfs')),
+    nfs:        serviceStatus(
+      native ? serviceConfigured('nfs') : (nfsEnabled && serviceConfigured('nfs')),
+      serviceRunning('nfs')
+    ),
     tailscale:  (() => {
-      if (!remoteEnabled || !serviceConfigured('tailscale')) return { status: 'disabled', latency_ms: 0 };
+      const enabled = native ? serviceConfigured('tailscale') : (remoteEnabled && serviceConfigured('tailscale'));
+      if (!enabled) return { status: 'disabled', latency_ms: 0 };
       const ts = tailscaleStatus();
       return { status: ts.connected ? 'ok' : 'offline', latency_ms: 0, ip: ts.ip };
     })(),
-    cloudflare: serviceStatus(remoteEnabled && serviceConfigured('cloudflared'), serviceRunning('cloudflared')),
+    cloudflare: serviceStatus(
+      native ? serviceConfigured('cloudflared') : (remoteEnabled && serviceConfigured('cloudflared')),
+      serviceRunning('cloudflared')
+    ),
   };
 
   const hasError = Object.values(services).some(s => s.status === 'error');

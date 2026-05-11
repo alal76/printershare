@@ -155,6 +155,76 @@
         @update:patch="patch = $event"
       />
 
+      <!-- ── Optional Components ────────────────────────────────────────────── -->
+      <Card>
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-8 h-8 rounded-xl bg-violet-50 flex items-center justify-center">
+            <PackageIcon class="w-4 h-4 text-violet-600" />
+          </div>
+          <div>
+            <h2 class="text-sm font-semibold text-gray-900">
+              Optional Components
+            </h2>
+            <p class="text-xs text-gray-500">
+              Install missing system components with one click.
+            </p>
+          </div>
+        </div>
+        <div
+          v-if="loadingComponents"
+          class="space-y-2"
+        >
+          <div
+            v-for="i in 3"
+            :key="i"
+            class="h-12 bg-gray-100 rounded-xl animate-pulse"
+          ></div>
+        </div>
+        <p
+          v-else-if="!nativeMode"
+          class="text-sm text-gray-400"
+        >
+          Component install is only available in native deployment mode.
+        </p>
+        <div
+          v-else
+          class="space-y-2"
+        >
+          <div
+            v-for="comp in components"
+            :key="comp.name"
+            class="flex items-center justify-between p-3 rounded-xl border border-gray-100"
+          >
+            <div class="flex-1 min-w-0 mr-4">
+              <p class="text-sm font-medium text-gray-800">
+                {{ comp.label }}
+              </p>
+              <p class="text-xs text-gray-400 truncate">
+                {{ comp.description }}
+              </p>
+            </div>
+            <div
+              v-if="comp.installed"
+              class="flex items-center gap-1.5 text-green-600 text-xs font-medium shrink-0"
+            >
+              <CheckCircle2Icon class="w-4 h-4" />
+              Installed
+            </div>
+            <Button
+              v-else
+              size="sm"
+              variant="secondary"
+              :loading="installing === comp.name"
+              :disabled="!!installing"
+              @click="installComponent(comp.name)"
+            >
+              <DownloadIcon class="w-3.5 h-3.5" />
+              Install
+            </Button>
+          </div>
+        </div>
+      </Card>
+
       <!-- ── Service Controls ────────────────────────────────────────────── -->
       <Card>
         <div class="flex items-center gap-3 mb-4">
@@ -220,7 +290,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter }      from 'vue-router'
-import { RefreshCwIcon, Loader2Icon, WandIcon, LockIcon } from 'lucide-vue-next'
+import { RefreshCwIcon, Loader2Icon, WandIcon, LockIcon, PackageIcon, CheckCircle2Icon, DownloadIcon } from 'lucide-vue-next'
 import AppShell from '@/components/layout/AppShell.vue'
 import Card     from '@/components/ui/Card.vue'
 import Button   from '@/components/ui/Button.vue'
@@ -243,6 +313,13 @@ const savingAuth   = ref(false)
 const adminUser    = ref('')
 const adminPass    = ref('')
 const savingAdmin  = ref(false)
+
+// ── Optional components ────────────────────────────────────────────────────
+interface ComponentDef { name: string; label: string; description: string; installed: boolean }
+const components       = ref<ComponentDef[]>([])
+const loadingComponents = ref(false)
+const nativeMode       = ref(false)
+const installing       = ref<string | null>(null)
 
 // ── Field group definitions ────────────────────────────────────────────────
 interface Field { key: string; label: string; placeholder?: string; secret?: boolean; hint?: string }
@@ -291,6 +368,7 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  fetchComponents()
 })
 
 // ── Auth toggle ────────────────────────────────────────────────────────────
@@ -331,6 +409,38 @@ async function saveAdmin() {
     toast.error('Save failed', err instanceof Error ? err.message : String(err))
   } finally {
     savingAdmin.value = false
+  }
+}
+
+// ── Fetch optional components ──────────────────────────────────────────────
+async function fetchComponents() {
+  loadingComponents.value = true
+  try {
+    const r = await fetch('/api/v1/services/components')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const data = await r.json() as { components: ComponentDef[]; native: boolean }
+    components.value = data.components
+    nativeMode.value  = data.native
+  } catch { /* silent */ } finally {
+    loadingComponents.value = false
+  }
+}
+
+async function installComponent(name: string) {
+  installing.value = name
+  const comp = components.value.find(c => c.name === name)
+  try {
+    const r = await fetch(`/api/v1/services/components/${name}/install`, { method: 'POST' })
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: 'Install failed' })) as { error?: string }
+      throw new Error(err.error ?? 'Install failed')
+    }
+    toast.success(`${comp?.label ?? name} installed`)
+    await fetchComponents()
+  } catch (err) {
+    toast.error('Install failed', err instanceof Error ? err.message : String(err))
+  } finally {
+    installing.value = null
   }
 }
 
