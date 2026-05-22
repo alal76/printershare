@@ -66,8 +66,7 @@
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <template v-if="system.health">
           <div
-            v-for="(svc, name) in system.health.services"
-            v-show="svc.status !== 'disabled'"
+            v-for="([name, svc]) in enabledServices"
             :key="name"
             :data-testid="`service-${name}`"
             class="bg-white rounded-2xl border p-3 flex flex-col gap-2 transition-colors"
@@ -93,6 +92,10 @@
                   {{ svc.message || svc.status }}
                 </p>
               </div>
+            </div>
+            <!-- Capabilities summary -->
+            <div class="text-xs text-gray-500 mt-1">
+              {{ serviceCapability(name) }}
             </div>
             <!-- bottom row: restart + toggle -->
             <div class="flex items-center gap-1.5 pt-0.5 border-t border-gray-50">
@@ -653,23 +656,60 @@ const keySettings = computed(() => {
   ]
 })
 
-const healthyCount = computed(() => {
-  if (!system.health) return 0
-  return Object.values(system.health.services).filter(s => s.status === 'ok').length
-})
-const totalCount = computed(() => Object.keys(system.health?.services ?? {}).length)
 
-const stats = computed(() => [
-  {
-    label: 'Services',
-    value: `${healthyCount.value}/${totalCount.value}`,
-    sub:   healthyCount.value === totalCount.value && totalCount.value > 0 ? 'All healthy' : 'Check status',
-    subColor: healthyCount.value === totalCount.value && totalCount.value > 0 ? 'text-green-600' : 'text-amber-600',
-    icon:  CheckCircleIcon,
-    bg:    'bg-green-50',
-    color: 'text-green-600',
-    onClick: undefined as (() => void) | undefined,
-  },
+// Only count non-disabled services for health stats
+const enabledServices = computed(() => {
+  if (!system.health) return []
+  return Object.entries(system.health.services)
+    .filter(([, s]) => s.status !== 'disabled')
+})
+const healthyCount = computed(() => enabledServices.value.filter(([, s]) => s.status === 'ok').length)
+const totalCount = computed(() => enabledServices.value.length)
+
+// Map service name to human-readable capability
+const SERVICE_CAPABILITIES: Record<string, string> = {
+  cups: 'Print',
+  'ipp-usb': 'USB-over-IP',
+  scanservjs: 'Scan',
+  samba: 'File Share',
+  nfs: 'NFS',
+  nginx: 'Web UI',
+  paperless: 'Cloud Docs',
+  tailscale: 'Remote Access',
+  cloudflared: 'Cloud Tunnel',
+}
+
+// Compute enabled capabilities summary (for main box)
+const enabledCapabilities = computed(() => {
+  return enabledServices.value
+    .map(([name]) => SERVICE_CAPABILITIES[name] || name)
+    .filter(Boolean)
+    .join(', ')
+})
+
+// Compute per-service capability label
+function serviceCapability(name: string): string {
+  return SERVICE_CAPABILITIES[name] || name
+}
+
+const stats = computed(() => {
+  let servicesSub: string
+  if (healthyCount.value === totalCount.value && totalCount.value > 0) {
+    servicesSub = enabledCapabilities.value ? enabledCapabilities.value : 'All healthy'
+  } else {
+    servicesSub = 'Check status'
+  }
+  return [
+    {
+      label: 'Services',
+      value: `${healthyCount.value}/${totalCount.value}`,
+      sub: servicesSub,
+      subColor: healthyCount.value === totalCount.value && totalCount.value > 0 ? 'text-green-600' : 'text-amber-600',
+      icon:  CheckCircleIcon,
+      bg:    'bg-green-50',
+      color: 'text-green-600',
+      onClick: undefined as (() => void) | undefined,
+    },
   {
     label: 'Scan Files',
     value: String(scan.files.length),
@@ -700,7 +740,8 @@ const stats = computed(() => [
     color: 'text-red-500',
     onClick: () => { showErrors.value = true },
   },
-])
+  ]
+})
 
 const SERVICE_ICONS: Record<string, Component> = {
   cups:       PrintIcon,
