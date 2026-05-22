@@ -25,6 +25,7 @@ Portal endpoints after installation:
 
 ### 1.1 Native install (Debian 12 / Ubuntu 22.04 LXC) — recommended
 
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/install.sh | sudo bash
 ```
@@ -32,9 +33,10 @@ curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/in
 The installer:
 - Installs CUPS, sane-utils, scanservjs, pdfunite (poppler-utils), nginx, Node.js 20
 - Clones the repo to `/opt/printershare`
-- Builds the portal frontend
-- Creates `/etc/systemd/system/printershare-portal.service` and enables it
-- Generates random `PORTAL_PASS` and `PORTAL_SECRET` in `/etc/printershare/portal.env`
+- Prepares the environment and prints next steps
+- **To complete install:**
+   - For bare metal: `sudo bash scripts/install-native.sh`
+   - For Proxmox LXC: `sudo bash scripts/proxmox/install.sh`
 - Prints your credentials at the end — **write them down**
 
 Services managed by systemd:
@@ -43,15 +45,6 @@ Services managed by systemd:
 - `scanservjs` — scan backend on port 8080
 - `nginx` — reverse proxy on port 80
 
-### 1.2 Docker Compose
-
-```bash
-git clone https://github.com/alal76/printershare.git
-cd printershare
-cp .env.example .env   # set PORTAL_PASS, PORTAL_SECRET, SAMBA_PASS
-docker compose up -d
-docker compose ps      # verify all services are Up
-```
 
 ---
 
@@ -94,6 +87,8 @@ If the printer is not visible: unplug and replug the USB cable, then re-run the 
    **Change Password** page immediately — enter a new password (minimum 8 characters)
 4. After changing the password, you land on the dashboard
 
+> as `PORTAL_PASS`. After changing it via the portal, the file is updated automatically —
+> no service restart required.
 > The generated password from the installer is stored in `/etc/printershare/portal.env`
 > as `PORTAL_PASS`. After changing it via the portal, the file is updated automatically —
 > no service restart required.
@@ -200,7 +195,7 @@ and embeds a searchable text layer (requires Tesseract to be installed on the ho
 
 ## 7. Scan file access
 
-Scanned files are saved to the scans directory on the host (`/scans` in native installs).
+Scanned files are saved to the scans directory on the host (`/scans`).
 They can be accessed from any device on the network:
 
 | Protocol | Address |
@@ -213,7 +208,7 @@ They can be accessed from any device on the network:
 
 ## 8. Daily operations
 
-### Native install (systemd)
+### Native/LXC install (systemd)
 
 ```bash
 systemctl status printershare-portal
@@ -224,14 +219,6 @@ journalctl -u scanservjs -f
 journalctl -u nginx -f
 ```
 
-### Docker Compose
-
-```bash
-docker compose ps
-docker compose logs -f ps-portal
-docker compose logs -f ps-cups
-docker compose restart ps-portal
-```
 
 ### Settings
 
@@ -241,8 +228,7 @@ Use the portal **Settings** view to change:
 - Tailscale / Cloudflare config
 
 Or edit the env file directly:
-- Native: `/etc/printershare/portal.env`
-- Docker: `.env` in the project root
+- Native/LXC: `/etc/printershare/portal.env`
 
 After changing the env file in native mode, restart the portal:
 ```bash
@@ -301,6 +287,7 @@ Check the portal service is running:
 systemctl is-active printershare-portal
 curl -s http://127.0.0.1:3000/api/v1/health | python3 -m json.tool
 ```
+
 
 If the password is unknown, reset it by editing `/etc/printershare/portal.env`:
 ```ini

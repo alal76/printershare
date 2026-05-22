@@ -51,14 +51,13 @@ USB Printer/Scanner
 \`\`\`
 
 The portal is a **Vue 3 + TypeScript SPA** backed by an **Express 4** API server.
-In the native install the portal process is managed by `systemd` (`printershare-portal.service`).
-Docker Compose (`docker-compose.yml`) is also supported for hosts that prefer containers.
+In the native or Proxmox LXC install, the portal process is managed by `systemd` (`printershare-portal.service`).
 
 ---
 
 ## Quick Start — Native Install (recommended)
 
-Tested on Debian 12 / Ubuntu 22.04 LXC.
+Tested on Debian 12 / Ubuntu 22.04 (bare metal or LXC).
 
 \`\`\`bash
 curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/install.sh | sudo bash
@@ -67,45 +66,18 @@ curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/in
 The installer:
 1. Installs system packages (CUPS, sane-utils, scanservjs, pdfunite, nginx, Node.js 20)
 2. Clones the repo to `/opt/printershare`
-3. Builds the portal frontend and installs `printershare-portal.service`
-4. Generates a random `PORTAL_PASS` and `PORTAL_SECRET` in `/etc/printershare/portal.env`
+3. Prepares the environment and prints next steps
+4. **To complete install:**
+  - For bare metal: `sudo bash scripts/install-native.sh`
+  - For Proxmox LXC: `sudo bash scripts/proxmox/install.sh`
 5. Prints a summary with your credentials — **save them**
 
 After install, open **http://\<host-ip\>/** and complete the Setup Wizard.
 
-Default login: **admin / changeme** — you will be forced to change the password on first login.
-
-### Manual native install
-
-\`\`\`bash
-git clone https://github.com/alal76/printershare.git /opt/printershare
-cd /opt/printershare/portal
-npm install
-npm run build
-cp -r dist public
-# copy scripts/printershare-portal.service to /etc/systemd/system/ and enable
-\`\`\`
+Default login: **admin / <generated password>** — you will be forced to change the password on first login.
 
 ---
 
-## Quick Start — Docker Compose
-
-\`\`\`bash
-git clone https://github.com/alal76/printershare.git
-cd printershare
-cp .env.example .env    # edit passwords and network settings
-docker compose up -d
-\`\`\`
-
-Open **http://\<host-ip\>/** and run the Setup Wizard.
-
-\`\`\`bash
-make up       # start all services
-make logs     # tail logs
-make down     # stop all services
-\`\`\`
-
----
 
 ## Proxmox LXC USB Passthrough
 
@@ -115,7 +87,7 @@ If the host is an LXC container on Proxmox, pass USB through from the Proxmox no
    \`\`\`bash
    pct list && lsusb
    \`\`\`
-2. Stop the container, add USB and Docker-friendly flags:
+2. Stop the container, add USB passthrough flags:
    \`\`\`bash
    pct stop <CTID>
    pct set <CTID> -features nesting=1,keyctl=1
@@ -212,17 +184,14 @@ sudo mount -t nfs <host-ip>:/exports/scans /mnt/scans
 | `SAMBA_WORKGROUP` | `WORKGROUP` | Samba workgroup |
 | `SAMBA_SHARE` | `scans` | Samba share name |
 | `NFS_ALLOWED_SUBNET` | `192.168.0.0/16` | Allowed NFS client CIDR |
-| `SCANS_HOST_PATH` | `/srv/printershare/scans` | Host path for scan files (Docker) |
-| `SCANS_PATH` | `/scans` | Scan files directory (native) |
+| `SCANS_PATH` | `/scans` | Scan files directory |
 | `SCANSERVJS_URL` | auto | Override scanservjs URL |
 | `RCLONE_GDRIVE_REMOTE` | — | rclone remote name for Google Drive |
 | `RCLONE_ONEDRIVE_REMOTE` | — | rclone remote name for OneDrive |
 | `TAILSCALE_AUTH_KEY` | — | Tailscale auth key for VPN |
 | `CLOUDFLARE_TUNNEL_TOKEN` | — | Cloudflare Tunnel token |
-| `COMPOSE_PROFILES` | — | Optional Docker profiles: `docs`, `remote` |
 
-- Native install reads from `/etc/printershare/portal.env`
-- Docker install reads from `.env` in the project root
+- Native/LXC install reads from `/etc/printershare/portal.env`
 
 ---
 

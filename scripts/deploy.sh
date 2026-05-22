@@ -1,32 +1,16 @@
 #!/usr/bin/env bash
 # Beta test version v1.2.0
 # ────────────────────────────────────────────────────────────────
-# deploy.sh — Pull latest code and restart the Docker Compose stack
+# deploy.sh — Pull latest code and restart the PrinterShare portal (native/LXC only)
 #
 # Usage:
-#   ./scripts/deploy.sh [--no-build] [--env-file <path>]
-#
-# Options:
-#   --no-build     Skip docker compose build (use cached images)
-#   --env-file     Path to .env file (default: .env)
+#   ./scripts/deploy.sh
 # ────────────────────────────────────────────────────────────────
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${REPO_ROOT}/.env"
-BUILD=true
-
-# ── Parse arguments ──────────────────────────────────────────────
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --no-build)    BUILD=false; shift ;;
-    --env-file)    ENV_FILE="$2"; shift 2 ;;
-    *)             echo "Unknown option: $1"; exit 1 ;;
-  esac
-done
-
-cd "${REPO_ROOT}"
 
 echo "==> Pulling latest changes..."
 git pull --ff-only
@@ -34,28 +18,17 @@ git pull --ff-only
 echo "==> Building portal assets..."
 (cd portal && npm ci --silent && npm run build && rm -rf public && cp -r dist public)
 
-if systemctl list-unit-files printershare-portal.service &>/dev/null && \
-   systemctl list-unit-files printershare-portal.service | grep -q printershare-portal; then
-  echo "==> Native (no Docker): restarting printershare-portal service..."
-  systemctl restart printershare-portal
-else
-  if [[ "${BUILD}" == "true" ]]; then
-    echo "==> Building Docker images..."
-    docker compose --env-file "${ENV_FILE}" build --parallel
-  fi
-
-  echo "==> Restarting services..."
-  docker compose --env-file "${ENV_FILE}" up -d --remove-orphans
-
-  # Single-file bind mounts (e.g. nginx.conf) are pinned to the inode they had
-  # when the container started.  `git pull` rewrites those files (new inode),
-  # so containers that bind-mount them must be restarted to see the change.
-  echo "==> Restarting containers with bind-mounted config files..."
-  docker compose --env-file "${ENV_FILE}" restart nginx >/dev/null 2>&1 || true
+# Check for systemd unit
+if ! systemctl list-unit-files printershare-portal.service | grep -q printershare-portal; then
+  echo "ERROR: printershare-portal.service not found. This deploy script only supports native/LXC deployments." >&2
+  exit 1
 fi
 
-echo "==> Waiting for health check..."
+echo "==> Restarting printershare-portal service..."
+systemctl restart printershare-portal
+
 sleep 5
+
 "${SCRIPT_DIR}/health-check.sh"
 
 echo "==> Deployment complete."

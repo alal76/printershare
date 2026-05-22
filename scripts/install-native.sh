@@ -1,12 +1,12 @@
 #!/bin/bash
 # Beta test version v1.2.0
 # ═══════════════════════════════════════════════════════════════════════════
-# install-native.sh — full bare-metal install on Ubuntu 22.04+  (no Docker)
+# install-native.sh — full bare-metal install on Ubuntu 22.04+ (no Docker, no Compose)
 #
 # Installs: CUPS, SANE+saned, Scanservjs (Node.js), rclone,
 #           Samba, NFS server, Nginx
 #
-# Usage: sudo bash install-native.sh
+# Usage: sudo bash scripts/install-native.sh
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 [[ $EUID -ne 0 ]] && { echo "Run as root: sudo bash $0"; exit 1; }
@@ -208,7 +208,7 @@ INSTALL COMPLETE  —  ${SERVER_IP}
  Portal auth : user=${PORTAL_USER_SHOW}  pass=${PORTAL_PASS_SHOW}
                (auth enabled — you will be prompted to set a new password on first login)
 
- Optional: bash scripts/setup-rclone.sh
- Optional: sudo bash scripts/install-usbip-server.sh
+Optional: sudo bash scripts/setup-rclone.sh
+Optional: sudo bash scripts/install-usbip-server.sh
 ════════════════════════════════════════════════════
 EOF

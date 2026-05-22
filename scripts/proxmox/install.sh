@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Beta test version v1.2.0
 # ============================================================================
-#  printershare — in-LXC installer  (Debian 12)
+#  printershare — in-LXC installer (Debian 12, native only)
 # ----------------------------------------------------------------------------
 #  Runs INSIDE a fresh Debian 12 container created by `printershare.sh` on the
-#  Proxmox host.  Installs every printershare component as a native service:
+#  Proxmox host. Installs every PrinterShare component as a native systemd service (no Docker):
 #
 #    * CUPS                 systemd  cups.service           :631
 #    * Avahi                systemd  avahi-daemon.service   mDNS
