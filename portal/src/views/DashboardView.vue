@@ -297,12 +297,53 @@
       </Card>
     </section>
 
-    <!-- ── Recent scans ──────────────────────────────────────────────────── -->
-    <section>
-      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-        Recent Scans
-      </h2>
-      <FileList :max="5" />
+    <!-- ── Recent activity (scans + prints) ─────────────────────────────── -->
+    <section class="grid lg:grid-cols-2 gap-3">
+      <div>
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          Recent Scans
+        </h2>
+        <FileList :max="5" />
+      </div>
+      <div>
+        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
+          Recent Prints
+        </h2>
+        <div
+          v-if="recentPrints.length === 0"
+          class="text-center py-10 text-gray-400 text-sm border border-dashed rounded-xl"
+        >
+          No print jobs yet
+        </div>
+        <div
+          v-else
+          class="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden bg-white"
+        >
+          <div
+            v-for="job in recentPrints"
+            :key="job.id"
+            class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+          >
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              :class="printJobBg(job.state)"
+            >
+              <PrinterIcon
+                class="w-4 h-4"
+                :class="printJobColor(job.state)"
+              />
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-900 truncate">
+                {{ job.name }}
+              </p>
+              <p class="text-xs text-gray-400 truncate">
+                {{ printJobLabel(job.state) }} · {{ job.created }}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ── Active jobs (print + scan) ───────────────────────────────────── -->
@@ -686,5 +727,25 @@ function statusColor(s: string) {
   if (s === 'ok')    return 'text-green-600'
   if (s === 'error') return 'text-red-500'
   return 'text-gray-400'
+}
+
+const recentPrints = computed(() => print.jobs.slice(0, 5))
+
+function printJobBg(state: string) {
+  if (state === 'completed')                return 'bg-green-50'
+  if (state === 'failed' || state === 'canceled') return 'bg-red-50'
+  return 'bg-purple-50'
+}
+function printJobColor(state: string) {
+  if (state === 'completed')                return 'text-green-600'
+  if (state === 'failed' || state === 'canceled') return 'text-red-500'
+  return 'text-purple-600'
+}
+function printJobLabel(state: string) {
+  if (state === 'completed') return 'Completed'
+  if (state === 'failed')    return 'Failed'
+  if (state === 'canceled')  return 'Canceled'
+  if (state === 'processing') return 'Printing'
+  return state.charAt(0).toUpperCase() + state.slice(1)
 }
 </script>

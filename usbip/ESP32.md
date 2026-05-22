@@ -71,13 +71,13 @@ The firmware will print its IP address on boot.
 
 ### 3. Add the printer to CUPS
 
-On the Docker host (192.168.0.36):
+On the Docker host (192.168.0.9):
 
 ```bash
 # Find the ESP32's IP from your router's DHCP table or the serial monitor output
 ESP_IP=192.168.0.XX
 
-# Add via the CUPS admin UI (http://192.168.0.36/cups) or the wizard, or:
+# Add via the CUPS admin UI (http://192.168.0.9/cups) or the wizard, or:
 docker exec ps-cups lpadmin -p ESP32-Printer \
     -E \
     -v "socket://${ESP_IP}:9100" \
