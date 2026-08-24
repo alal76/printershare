@@ -1,0 +1,9 @@
+[Unit]
+Description=PrinterShare scheduled config/state backup (one-shot)
+
+[Service]
+Type=oneshot
+# DEST_DIR overrides backup.sh's default (which is relative to wherever the
+# script file lives — meaningless once it's a flat copy in /usr/local/bin).
+Environment=DEST_DIR=/var/backups/printershare
+ExecStart=/usr/local/bin/printershare-backup.sh

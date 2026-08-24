@@ -2,7 +2,7 @@
 'use strict';
 
 const router = require('express').Router();
-const { execFile } = require('node:child_process');
+const { execFile, spawnSync } = require('node:child_process');
 const { isNative, serviceRunning, serviceConfigured } = require('../lib/deployment');
 
 // In native mode, CUPS and scanservjs run on localhost; in Docker we
@@ -11,6 +11,33 @@ const CUPS_HOST           = process.env.CUPS_HOST           || (isNative() ? '12
 const CUPS_PORT           = Number.parseInt(process.env.CUPS_PORT  || '631', 10);
 const SCANSERVJS_INTERNAL = process.env.SCANSERVJS_INTERNAL || process.env.SCANSERVJS_URL || (isNative() ? 'http://127.0.0.1:8080' : 'http://ps-scanservjs:8080');
 const PAPERLESS_INTERNAL  = process.env.PAPERLESS_INTERNAL  || 'http://ps-paperless:8000';
+const SCANS_DISK_PATH     = process.env.SCANS_HOST_PATH || (isNative() ? '/srv/printershare/scans' : '/scans');
+
+/**
+ * Check disk usage of the filesystem holding the scans directory (`df`).
+ * Not part of the restartable `services` map — it's a metric, not a
+ * service — so the frontend surfaces it separately rather than growing a
+ * "Restart"/"Stop" button for a disk.
+ * @returns {{ percentUsed: number, availableGb: number, status: 'ok'|'warning'|'critical' } | null}
+ */
+function checkDiskSpace() {
+  try {
+    const r = spawnSync('df', ['-Pk', SCANS_DISK_PATH], { encoding: 'utf8', timeout: 3000 });
+    if (r.status !== 0 || !r.stdout) return null;
+    const lines = r.stdout.trim().split('\n');
+    const fields = lines[lines.length - 1].trim().split(/\s+/);
+    const totalKb = Number.parseInt(fields[1], 10);
+    const usedKb  = Number.parseInt(fields[2], 10);
+    const availKb = Number.parseInt(fields[3], 10);
+    if (!Number.isFinite(totalKb) || totalKb <= 0) return null;
+    const percentUsed  = Math.round((usedKb / totalKb) * 100);
+    const availableGb  = Math.round((availKb / 1024 / 1024) * 10) / 10;
+    const status = percentUsed >= 90 ? 'critical' : percentUsed >= 80 ? 'warning' : 'ok';
+    return { percentUsed, availableGb, status };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Parse COMPOSE_PROFILES env var into a Set of active profile names.
@@ -134,10 +161,12 @@ router.get('/', async (_req, res) => {
   };
 
   const hasError = Object.values(services).some(s => s.status === 'error');
+  const disk = checkDiskSpace();
 
   res.json({
-    status: hasError ? 'degraded' : 'ok',
+    status: hasError || disk?.status === 'critical' ? 'degraded' : 'ok',
     services,
+    disk,
     timestamp: new Date().toISOString(),
   });
 });

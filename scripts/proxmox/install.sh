@@ -226,6 +226,55 @@ install -o root -g root -m 644 \
 systemctl daemon-reload
 systemctl enable --now printershare-hotplug.timer
 
+# ── Scan retention purge ─────────────────────────────────────────────────
+# Daily timer that deletes scan files older than SCANS_RETENTION_DAYS
+# (default 14, configurable from the portal's Settings page).
+info "Installing scan retention purge timer..."
+install -o root -g root -m 755 \
+    "$REPO_DIR/scripts/scan-purge.sh" \
+    /usr/local/bin/printershare-scan-purge.sh
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/printershare-scan-purge.service" \
+    /etc/systemd/system/printershare-scan-purge.service
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/printershare-scan-purge.timer" \
+    /etc/systemd/system/printershare-scan-purge.timer
+systemctl daemon-reload
+systemctl enable --now printershare-scan-purge.timer
+
+# ── Scheduled backups ─────────────────────────────────────────────────────
+# Weekly config/state backup to /var/backups/printershare, pruned after 30
+# days. scripts/restore.sh is installed alongside for recovery — untested
+# backups aren't real backups, so it's a first-class part of this install,
+# not an afterthought.
+info "Installing scheduled backup timer..."
+mkdir -p /var/backups/printershare
+install -o root -g root -m 755 \
+    "$REPO_DIR/scripts/backup.sh" \
+    /usr/local/bin/printershare-backup.sh
+install -o root -g root -m 755 \
+    "$REPO_DIR/scripts/restore.sh" \
+    /usr/local/bin/printershare-restore.sh
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/printershare-backup.service" \
+    /etc/systemd/system/printershare-backup.service
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/printershare-backup.timer" \
+    /etc/systemd/system/printershare-backup.timer
+systemctl daemon-reload
+systemctl enable --now printershare-backup.timer
+
+# ── Log rotation + journal retention ─────────────────────────────────────
+info "Configuring log rotation..."
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/logrotate/printershare" \
+    /etc/logrotate.d/printershare
+mkdir -p /etc/systemd/journald.conf.d
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/journald-printershare.conf" \
+    /etc/systemd/journald.conf.d/printershare.conf
+systemctl restart systemd-journald
+
 info "Applying device quirks (per portal/server/data/device-quirks.json)"
 QUIRK_PKGS="$("$REPO_DIR/scripts/apply-device-quirks.sh" || true)"
 if [[ -n "$QUIRK_PKGS" ]]; then
@@ -401,6 +450,8 @@ _env_set_default PORTAL_AUTH    "true"
 _env_set_default PORTAL_USER    "admin"
 _env_set_default PORTAL_PASS    "$(openssl rand -hex 12)"
 _env_set_default PORTAL_SECRET  "$(openssl rand -hex 32)"
+_env_set_default SCANS_RETENTION_DAYS "14"
+_env_set_default LOG_LEVEL      "info"
 # Cache the generated values so the summary can display them.
 PORTAL_PASS_SHOW="$(grep '^PORTAL_PASS=' /etc/printershare/portal.env | cut -d= -f2-)"
 PORTAL_USER_SHOW="$(grep '^PORTAL_USER=' /etc/printershare/portal.env | cut -d= -f2-)"

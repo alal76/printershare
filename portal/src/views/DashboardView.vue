@@ -692,6 +692,20 @@ function serviceCapability(name: string): string {
   return SERVICE_CAPABILITIES[name] || name
 }
 
+const diskSub = computed(() => {
+  const disk = system.health?.disk
+  if (!disk) return 'On this device'
+  if (disk.status === 'critical') return `⚠ Disk ${disk.percentUsed}% full`
+  if (disk.status === 'warning')  return `Disk ${disk.percentUsed}% full`
+  return 'On this device'
+})
+const diskSubColor = computed(() => {
+  const status = system.health?.disk?.status
+  if (status === 'critical') return 'text-red-500'
+  if (status === 'warning')  return 'text-amber-600'
+  return 'text-gray-400'
+})
+
 const stats = computed(() => {
   let servicesSub: string
   if (healthyCount.value === totalCount.value && totalCount.value > 0) {
@@ -713,8 +727,8 @@ const stats = computed(() => {
   {
     label: 'Scan Files',
     value: String(scan.files.length),
-    sub:   'On this device',
-    subColor: 'text-gray-400',
+    sub:   diskSub.value,
+    subColor: diskSubColor.value,
     icon:  ScanIcon,
     bg:    'bg-blue-50',
     color: 'text-blue-600',

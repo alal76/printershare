@@ -25,6 +25,9 @@
 
 const { spawnSync } = require('node:child_process');
 const { cupsCmd } = require('./deployment');
+const { makeLogger } = require('./logger');
+
+const log = makeLogger('device-lock');
 
 /** Sequential lock chain — every withScanLock() awaits the previous one. */
 let chain = Promise.resolve();
@@ -103,7 +106,7 @@ function withScanLock(fn) {
           disabled.push(q);
         } catch (e) {
           // Disable failed — note and continue; we still try to scan.
-          console.warn(`[device-lock] cupsdisable ${q} failed: ${e.message}`);
+          log.warn(`cupsdisable ${q} failed`, { error: e.message });
         }
       }
 

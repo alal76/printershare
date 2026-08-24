@@ -1,0 +1,6 @@
+[Unit]
+Description=PrinterShare scan file retention purge (one-shot)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/printershare-scan-purge.sh

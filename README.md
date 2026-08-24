@@ -27,6 +27,10 @@ for scanning, job management, and configuration.
 | 📎 **PPD upload** | Apply a vendor-supplied `.ppd` directly for printers with no packaged driver |
 | 🖨️ **Non-driverless network printers** | `socket://` (raw/JetDirect) and `lpd://` printers, with driver picker |
 | 🌐 **Static network scanners** | Register an eSCL/WSD scanner outside the mDNS broadcast domain (different subnet/VLAN) |
+| 📝 **Structured logging** | Leveled logger + HTTP/audit request logging; journald retention capped so logs can't fill the disk |
+| 🗑️ **Scan retention** | Scan files auto-deleted after 14 days (configurable, 0 = keep forever) via a daily timer |
+| 💾 **Scheduled backups** | Weekly config/state backup with 30-day pruning, plus a tested `restore.sh` |
+| 📊 **Disk space monitoring** | Dashboard warns before the scans partition fills up |
 
 ---
 
@@ -207,6 +211,9 @@ integrations above are a convenience layer on top of it.
 | `SAMBA_SHARE` | `scans` | Samba share name |
 | `NFS_ALLOWED_SUBNET` | `192.168.0.0/16` | Allowed NFS client CIDR |
 | `SCANS_PATH` | `/scans` | Scan files directory |
+| `SCANS_RETENTION_DAYS` | `14` | Scan files older than this are deleted daily; `0` = keep forever |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` — takes effect on next restart |
+| `LOG_FORMAT` | text | Set `json` for one JSON object per log line (log shipping/aggregation) |
 | `SCANSERVJS_URL` | auto | Override scanservjs URL |
 | `RCLONE_GDRIVE_REMOTE` | — | rclone remote name for Google Drive |
 | `RCLONE_ONEDRIVE_REMOTE` | — | rclone remote name for OneDrive |
@@ -392,12 +399,29 @@ rm -rf public && cp -r dist public
 systemctl restart printershare-portal
 ```
 
-### Backup
+### Backup & restore
+
+A native/LXC install backs up the portal env file, CUPS config, Samba config,
+the network-scanner config, portal state, and scan files (Docker mode backs
+up named volumes instead — legacy path, kept for anyone still on it):
 
 ```bash
 ./scripts/backup.sh                  # → backups/YYYY-MM-DD_HH-MM-SS.tar.gz
 ./scripts/backup.sh --dest /mnt/nas
+./scripts/backup.sh --exclude-scans  # config/state only — scans covered by cloud backup already
 ```
+
+A `printershare-backup.timer` runs this weekly to `/var/backups/printershare`
+(installed automatically by `install-native.sh` / `proxmox/install.sh`),
+pruning archives older than 30 days. Restore with:
+
+```bash
+sudo bash scripts/restore.sh /var/backups/printershare/2026-08-24_03-00-00.tar.gz
+```
+
+It lists what it's about to overwrite and asks for confirmation before
+touching anything (`--yes` skips the prompt for scripted use), then restarts
+the affected services.
 
 ### Creating a release
 
@@ -406,6 +430,45 @@ systemctl restart printershare-portal
 ./scripts/release.sh minor
 ./scripts/release.sh major
 ```
+
+---
+
+## Logging, Retention & Backups
+
+Everything below is installed automatically by `install-native.sh` /
+`proxmox/install.sh` — nothing here needs manual setup on a fresh install.
+
+**Logging** — the portal logs through `server/lib/logger.js` to
+stdout/stderr, which systemd captures into the journal:
+
+```bash
+journalctl -u printershare-portal -f          # everything
+journalctl -u printershare-portal -f -g audit  # mutating API calls only (who changed what)
+```
+
+Every non-GET `/api/v1/*` request (printer/scanner changes, settings
+updates, driver installs, logins) is logged at `audit` regardless of
+`LOG_LEVEL`, with the acting user, IP, status, and duration — no request
+bodies, so secrets in settings PATCHes are never logged. Routine GET
+polling logs at `debug`, silent by default. journald itself is capped
+(`journald.conf.d/printershare.conf`, 200MB / 2 weeks) so logs can't fill a
+small LXC container's disk over time; CUPS, Samba, and nginx already ship
+their own logrotate rules, and the shell-script side of this project
+(hotplug detection, scan purge, scheduled backups) gets one more —
+`/etc/logrotate.d/printershare` — for the plain files those write.
+
+**Scan retention** — `printershare-scan-purge.timer` runs daily and
+deletes scan files older than `SCANS_RETENTION_DAYS` (default 14, `0` =
+keep forever). Configurable from Settings → Storage & Retention, or by
+editing the env file directly. This is independent of the rclone cloud
+backup feature — if you rely on that upload instead of local retention,
+make sure `SCANS_RETENTION_DAYS` is generous enough to not race an upload.
+
+```bash
+journalctl -t printershare-scan-purge -n 20
+```
+
+**Backups** — see [Backup & restore](#backup--restore) below.
 
 ---
 

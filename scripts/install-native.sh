@@ -116,6 +116,55 @@ install -o root -g root -m 644 \
 systemctl daemon-reload
 systemctl enable --now printershare-hotplug.timer
 
+# ── Scan retention purge ─────────────────────────────────────────────────
+# Daily timer that deletes scan files older than SCANS_RETENTION_DAYS
+# (default 14, configurable from the portal's Settings page).
+info "Installing scan retention purge timer..."
+install -o root -g root -m 755 \
+    "$(dirname "$0")/scan-purge.sh" \
+    /usr/local/bin/printershare-scan-purge.sh
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/printershare-scan-purge.service" \
+    /etc/systemd/system/printershare-scan-purge.service
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/printershare-scan-purge.timer" \
+    /etc/systemd/system/printershare-scan-purge.timer
+systemctl daemon-reload
+systemctl enable --now printershare-scan-purge.timer
+
+# ── Scheduled backups ─────────────────────────────────────────────────────
+# Weekly config/state backup to /var/backups/printershare, pruned after 30
+# days. scripts/restore.sh is installed alongside for recovery — untested
+# backups aren't real backups, so it's a first-class part of this install,
+# not an afterthought.
+info "Installing scheduled backup timer..."
+mkdir -p /var/backups/printershare
+install -o root -g root -m 755 \
+    "$(dirname "$0")/backup.sh" \
+    /usr/local/bin/printershare-backup.sh
+install -o root -g root -m 755 \
+    "$(dirname "$0")/restore.sh" \
+    /usr/local/bin/printershare-restore.sh
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/printershare-backup.service" \
+    /etc/systemd/system/printershare-backup.service
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/printershare-backup.timer" \
+    /etc/systemd/system/printershare-backup.timer
+systemctl daemon-reload
+systemctl enable --now printershare-backup.timer
+
+# ── Log rotation + journal retention ─────────────────────────────────────
+info "Configuring log rotation..."
+install -o root -g root -m 644 \
+    "$(dirname "$0")/logrotate/printershare" \
+    /etc/logrotate.d/printershare
+mkdir -p /etc/systemd/journald.conf.d
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/journald-printershare.conf" \
+    /etc/systemd/journald.conf.d/printershare.conf
+systemctl restart systemd-journald
+
 # ── CUPS ─────────────────────────────────────────────────────────────────
 info "Configuring CUPS..."
 cp "$(dirname "$0")/../cups/cupsd.conf" /etc/cups/cupsd.conf
@@ -214,6 +263,8 @@ _env_set_default PORTAL_AUTH   "true"
 _env_set_default PORTAL_USER   "admin"
 _env_set_default PORTAL_PASS   "$PORTAL_PASS"
 _env_set_default PORTAL_SECRET "$PORTAL_SECRET"
+_env_set_default SCANS_RETENTION_DAYS "14"
+_env_set_default LOG_LEVEL     "info"
 PORTAL_PASS_SHOW="$(grep '^PORTAL_PASS=' "$PORTAL_ENV" | cut -d= -f2-)"
 PORTAL_USER_SHOW="$(grep '^PORTAL_USER=' "$PORTAL_ENV" | cut -d= -f2-)"
 

@@ -13,12 +13,16 @@ require('dotenv').config({ path: process.env.DOTENV_PATH || '/config/.env' });
 
 const app  = require('./app');
 const { MODE } = require('./lib/deployment');
+const { makeLogger } = require('./lib/logger');
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const log = makeLogger('startup');
 
 app.listen(PORT, '0.0.0.0', () => {
   const cupsDefault = MODE === 'native' ? '127.0.0.1' : 'host.docker.internal';
-  console.log(`[portal] Listening on http://0.0.0.0:${PORT}`);
-  console.log(`[portal] Deployment mode: ${MODE}`);
-  console.log(`[portal] CUPS  → ${process.env.CUPS_HOST || cupsDefault}:${process.env.CUPS_PORT || 631}`);
-  console.log(`[portal] Scans → ${process.env.SCANS_PATH || '/scans'}`);
+  log.info('Listening', {
+    url:    `http://0.0.0.0:${PORT}`,
+    mode:   MODE,
+    cups:   `${process.env.CUPS_HOST || cupsDefault}:${process.env.CUPS_PORT || 631}`,
+    scans:  process.env.SCANS_PATH || '/scans',
+  });
 });

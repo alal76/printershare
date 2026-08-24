@@ -1,0 +1,20 @@
+# PrinterShare — rotation for the plain log files its shell-script side
+# writes directly (hotplug detection, scan retention purge, backups).
+#
+# The portal itself, CUPS, Samba, and nginx all log through systemd/journald
+# or their own package-provided logrotate rules already — this file only
+# covers the files PrinterShare adds on top of that.
+#
+# Installed to /etc/logrotate.d/printershare by scripts/install-native.sh
+# and scripts/proxmox/install.sh.
+/var/log/printershare-hotplug.log
+/var/log/printershare-scan-purge.log
+/var/log/printershare-backup.log
+{
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    create 0644 root root
+}

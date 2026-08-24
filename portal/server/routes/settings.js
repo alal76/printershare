@@ -36,7 +36,9 @@ const ALLOWED_SETTINGS = new Set([
   'RCLONE_GDRIVE_REMOTE',
   'RCLONE_ONEDRIVE_REMOTE',
   'SCANS_HOST_PATH',
+  'SCANS_RETENTION_DAYS',
   'CUPS_EXTRA_PACKAGES',
+  'LOG_LEVEL',
 ]);
 
 function isValidPort(raw) {
@@ -48,6 +50,12 @@ function isValidCidr(raw) {
   return /^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/.test(String(raw));
 }
 
+/** 0 (or blank, handled by caller) means "keep forever". */
+function isValidRetentionDays(raw) {
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isInteger(n) && n >= 0 && n <= 3650;
+}
+
 function validateValue(key, val) {
   if (key.endsWith('_PORT') && !isValidPort(val)) {
     throw new Error(`Invalid port for ${key}`);
@@ -57,6 +65,12 @@ function validateValue(key, val) {
   }
   if (key === 'PORTAL_PASS' && val && val.length < 8) {
     throw new Error('PORTAL_PASS must be at least 8 characters');
+  }
+  if (key === 'SCANS_RETENTION_DAYS' && val !== '' && !isValidRetentionDays(val)) {
+    throw new Error('SCANS_RETENTION_DAYS must be a whole number of days (0 = keep forever)');
+  }
+  if (key === 'LOG_LEVEL' && val && !['debug', 'info', 'warn', 'error'].includes(String(val).toLowerCase())) {
+    throw new Error('LOG_LEVEL must be one of debug, info, warn, error');
   }
 }
 

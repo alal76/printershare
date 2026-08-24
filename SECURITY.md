@@ -37,6 +37,8 @@ You can expect an acknowledgement within 72 hours and a patch within 14 days for
 | **PPD upload validation** | Printer driver uploads (`POST /devices/printer/:name/ppd`) are capped at 512KB, must have a `.ppd` extension, and are rejected unless they start with the `*PPD-Adobe:` magic header — plain-text CUPS config, never an executable |
 | **No arbitrary driver execution** | Driver installs only ever come from apt (Debian-packaged) or a user-supplied PPD text file; nothing fetches or runs a vendor installer binary. SANE scanner backends are native code with no equivalent upload path, deliberately, to avoid accepting arbitrary code to `dlopen()` as root |
 | **Unattended driver installs** | `printershare-hotplug.timer` polls USB changes every 20s and runs `apt-get install` as root for any matched quirks-catalogue package — scoped to the curated `device-quirks.json` catalogue, not arbitrary packages |
+| **Audit logging** | Every mutating `/api/v1/*` request (printer/scanner changes, settings updates, driver installs, logins) is logged with the acting user, IP, and status — `journalctl -u printershare-portal -g audit`. Request bodies are never logged, so PATCH `/settings` payloads (which can contain passwords/tokens) never appear in logs |
+| **Bounded log retention** | journald is capped at 200MB / 2 weeks (`journald.conf.d/printershare.conf`) and the plain log files the shell-script side writes (hotplug, scan-purge, scheduled backups) are rotated weekly, 4 generations, via `/etc/logrotate.d/printershare` — logs can't silently fill the disk |
 
 ---
 

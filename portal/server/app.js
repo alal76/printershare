@@ -25,8 +25,14 @@
 const express = require('express');
 const path    = require('node:path');
 const { AUTH_ENABLED, readSessionToken, verifySessionToken } = require('./lib/auth');
+const { makeLogger } = require('./lib/logger');
 
 const app = express();
+
+// nginx is the only thing that can reach the portal's port; trust its
+// X-Forwarded-For so audit log entries record the real client IP instead
+// of nginx's own loopback address.
+app.set('trust proxy', true);
 
 // ── Security / body-parsing middleware ────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -58,6 +64,34 @@ function requireApiAuth(req, res, next) {
 }
 
 app.use(requireApiAuth);
+
+// ── Request logging ─────────────────────────────────────────────────────────
+// Mutating API calls (anything that isn't a GET) are logged at "info" under
+// the "audit" category regardless of LOG_LEVEL — who changed what matters
+// for accountability once more than one admin has access. Routine GETs
+// (dashboard polling, device refreshes, health checks) are logged at
+// "debug" so they're silent unless someone explicitly wants that detail.
+const httpLog  = makeLogger('http');
+const auditLog = makeLogger('audit');
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const meta = {
+      status: res.statusCode,
+      ms:     Date.now() - start,
+      user:   req.user || 'anonymous',
+      ip:     req.ip,
+    };
+    const isMutation = req.method !== 'GET' && req.path.startsWith('/api/');
+    if (isMutation) {
+      auditLog.info(`${req.method} ${req.path}`, meta);
+    } else if (req.path !== '/api/v1/health') {
+      httpLog.debug(`${req.method} ${req.path}`, meta);
+    }
+  });
+  next();
+});
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/v1/health',   require('./routes/health'));

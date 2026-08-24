@@ -28,6 +28,19 @@
         @update:patch="patch = $event"
       />
 
+      <!-- ── Storage & Retention ─────────────────────────────────────────── -->
+      <SettingsSection
+        title="Storage & Retention"
+        description="How long scan files are kept, and how much detail the portal logs. Takes effect on next restart."
+        icon="other"
+        :fields="retentionFields"
+        :patch="patch"
+        :loading="loading"
+        :saving="savingGroup === 'retention'"
+        @save="saveGroup('retention', retentionFields)"
+        @update:patch="patch = $event"
+      />
+
       <!-- ── Admin Access ────────────────────────────────────────────────── -->
       <Card>
         <div class="flex items-center gap-3 mb-5">
@@ -478,6 +491,11 @@ const sharingFields: Field[] = [
   { key: 'SAMBA_WORKGROUP', label: 'Samba Workgroup',  placeholder: 'WORKGROUP' },
   { key: 'SAMBA_SHARE',     label: 'Share Name',       placeholder: 'scans' },
   { key: 'NFS_ALLOWED_SUBNET', label: 'NFS Allowed Network', placeholder: '192.168.1.0/24', hint: 'CIDR of hosts allowed to mount via NFS' },
+]
+
+const retentionFields: Field[] = [
+  { key: 'SCANS_RETENTION_DAYS', label: 'Scan Retention (days)', placeholder: '14', hint: 'Scan files older than this are deleted daily. 0 = keep forever.' },
+  { key: 'LOG_LEVEL', label: 'Log Level', placeholder: 'info', hint: 'debug, info, warn, or error — journalctl -u printershare-portal' },
 ]
 
 const securityFields: Field[] = [

@@ -8,9 +8,16 @@ interface ServiceHealth {
   ip?: string
 }
 
+interface DiskHealth {
+  percentUsed:  number
+  availableGb:  number
+  status:       'ok' | 'warning' | 'critical'
+}
+
 interface HealthData {
   status: string
   services: Record<string, ServiceHealth>
+  disk?: DiskHealth | null
   timestamp: string
 }
 

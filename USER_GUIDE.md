@@ -290,6 +290,47 @@ The easiest way to enable Tailscale doesn't need an auth key at all:
 The **Tailscale Auth Key** field further down (under "Remote Access (Advanced)") is still
 available for unattended/scripted provisioning, but isn't needed for normal setup.
 
+### Logs
+
+The portal logs to the journal — everything goes through `journalctl`, nothing to
+configure:
+
+```bash
+journalctl -u printershare-portal -f                # everything, live
+journalctl -u printershare-portal -f -g audit         # who changed what (logins, printer/scanner
+                                                       # changes, settings updates) — no secrets logged
+journalctl -u printershare-portal --since "1 hour ago"
+```
+
+Set **Log Level** in Settings → Storage & Retention (`debug`/`info`/`warn`/`error`) if
+you need more or less detail; it takes effect on the next restart. Journal disk usage is
+capped at 200MB / 2 weeks by default so it can't fill up the host over time.
+
+### Scan file retention
+
+Scan files are deleted automatically after 14 days by default. To change that:
+
+1. Open **Settings → Storage & Retention**
+2. Set **Scan Retention (days)** — `0` keeps everything forever
+3. Save
+
+The purge itself runs once a day (`printershare-scan-purge.timer`). To check what it's
+done:
+
+```bash
+journalctl -t printershare-scan-purge -n 20
+```
+
+If you rely on the cloud-backup rclone upload rather than local retention, make sure the
+retention window is generous enough that files aren't deleted before they've had a chance
+to upload.
+
+### Disk space
+
+The Dashboard's **Scan Files** tile shows a warning once the scans partition passes 80%
+used, and turns red past 90% — a heads-up before the disk actually fills, which would
+otherwise fail scans and backups silently.
+
 ---
 
 ## 9. Update / redeploy
@@ -309,17 +350,43 @@ systemctl restart printershare-portal
 
 ---
 
-## 10. Backup
+## 10. Backup & restore
 
+A weekly backup runs automatically (`printershare-backup.timer`) to
+`/var/backups/printershare`, pruned after 30 days. It includes:
+- Portal env file (`/etc/printershare/portal.env`)
+- CUPS configuration (`/etc/cups`)
+- Samba configuration (`/etc/samba/smb.conf`)
+- Network scanner configuration (`/etc/sane.d/airscan.conf`)
+- Portal state (default printer/scanner preference, wizard state)
+- Scan files
+
+To run one manually:
 ```bash
 ./scripts/backup.sh                  # → backups/YYYY-MM-DD_HH-MM-SS.tar.gz
 ./scripts/backup.sh --dest /mnt/nas
+./scripts/backup.sh --exclude-scans  # config/state only
 ```
 
-The backup includes:
-- Scan files (`/scans`)
-- CUPS configuration (`/etc/cups`)
-- Portal env file (`/etc/printershare/portal.env`)
+Check what the scheduled backup has been doing:
+```bash
+journalctl -t printershare-backup -n 20
+ls -la /var/backups/printershare/
+```
+
+### Restoring
+
+```bash
+sudo bash scripts/restore.sh /var/backups/printershare/2026-08-24_03-00-00.tar.gz
+```
+
+It prints what it's about to overwrite and asks for confirmation first — nothing happens
+until you confirm (or pass `--yes` for scripted use). It restarts CUPS, Samba, and the
+portal afterward so the restored config takes effect immediately.
+
+**Test this before you need it.** A backup nobody has ever restored from isn't a backup
+you can rely on — run `restore.sh` against a recent archive at least once so you know the
+procedure works before an actual failure.
 
 ---
 
@@ -394,6 +461,22 @@ curl -X POST http://${HOST_IP}/api/v1/wizard/apply-quirks | python3 -m json.tool
 1. Open `http://${HOST_IP}/cups/` and clear blocked jobs
 2. Power-cycle the printer
 3. Run a test page from the portal **Devices** view
+
+### Disk filling up
+
+The Dashboard's Scan Files tile warns at 80% used and turns red past 90%. Check:
+
+```bash
+df -h /srv/printershare/scans
+journalctl -t printershare-scan-purge -n 20   # is the daily purge actually running?
+```
+
+If scans are accumulating faster than expected, lower **Scan Retention (days)** in
+Settings → Storage & Retention, or purge manually right now:
+
+```bash
+sudo systemctl start printershare-scan-purge.service
+```
 
 ### Device-specific quirks
 
