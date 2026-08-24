@@ -20,7 +20,7 @@ command -v rclone &>/dev/null || {
 }
 
 if [[ "$MODE" == "--test" ]]; then
-    _remotes="$(rclone listremotes)"
+    _remotes="$(rclone listremotes 2>/dev/null || true)"
     for REMOTE in "$GDRIVE_REMOTE" "$ONEDRIVE_REMOTE"; do
         if grep -qE "^${REMOTE}:" <<<"$_remotes"; then
             echo -n "  [${REMOTE}] Testing... "
