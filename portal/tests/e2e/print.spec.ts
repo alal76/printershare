@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test'
 const MOCK_DEVICES = {
   usb:      [],
   printers: [
-    { name: 'HP-LaserJet', state: 'idle', stateReason: '', location: '', makeModel: 'HP', uri: 'ipp://localhost:631/printers/HP-LaserJet' },
+    { name: 'HP-LaserJet', state: 'idle', stateReasons: [], location: '', makeModel: 'HP', uri: 'ipp://localhost:631/printers/HP-LaserJet', hasDriver: true, driverName: 'HP LaserJet' },
   ],
 }
 

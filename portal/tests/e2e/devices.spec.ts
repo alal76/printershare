@@ -7,7 +7,7 @@ const MOCK_DEVICES = {
     { bus: '001', device: '005', vid: '04b8', pid: '013c', vidpid: '04b8:013c', name: 'Epson Perfection V39',  make: 'Epson', model: 'Perfection V39', capabilities: { print: false, scan: true, escl: true, fax: false } },
   ],
   printers: [
-    { name: 'HP-LaserJet', state: 'idle', stateReason: '', location: 'Office', makeModel: 'HP LaserJet Pro', uri: 'ipp://localhost:631/printers/HP-LaserJet' },
+    { name: 'HP-LaserJet', state: 'idle', stateReasons: [], location: 'Office', makeModel: 'HP LaserJet Pro', uri: 'ipp://localhost:631/printers/HP-LaserJet', hasDriver: true, driverName: 'HP LaserJet Pro' },
   ],
 }
 

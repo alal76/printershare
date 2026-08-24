@@ -13,7 +13,7 @@ const MOCK_HEALTH = {
 
 const MOCK_DEVICES = {
   usb:      [],
-  printers: [{ name: 'HP-LaserJet', state: 'idle', stateReason: '', location: '', makeModel: 'HP LaserJet Pro', uri: 'ipp://localhost:631/printers/HP-LaserJet' }],
+  printers: [{ name: 'HP-LaserJet', state: 'idle', stateReasons: [], location: '', makeModel: 'HP LaserJet Pro', uri: 'ipp://localhost:631/printers/HP-LaserJet', hasDriver: true, driverName: 'HP LaserJet Pro' }],
 }
 
 test.describe('Dashboard', () => {
