@@ -3,8 +3,10 @@
 
 /**
  * @module lib/env
- * @description Shared helpers for reading and writing the `.env` configuration
- * file that is bind-mounted into the container at {@link DOTENV_PATH}.
+ * @description Shared helpers for reading and writing the runtime `.env`
+ * configuration file: `/config/.env` bind-mounted into the container in
+ * Docker mode, or `/etc/printershare/portal.env` in native/LXC mode — see
+ * {@link DOTENV_PATH}.
  *
  * Both `routes/wizard.js` and `routes/settings.js` delegate to these
  * functions so the serialisation / deserialisation logic lives in one place.
@@ -19,9 +21,18 @@
 
 const fs   = require('node:fs');
 const path = require('node:path');
+const { isNative } = require('./deployment');
 
-/** Default path to the mounted .env file inside the container. */
-const DOTENV_PATH = process.env.DOTENV_PATH || '/config/.env';
+/**
+ * Default path to the runtime env file. Must match `routes/wizard.js`'s
+ * `/build` endpoint, which resolves this the same way — the two used to
+ * disagree (this file always defaulted to the Docker path, even in native
+ * mode), which meant Settings-page reads/writes silently went to
+ * `/config/.env` instead of `/etc/printershare/portal.env`, the file the
+ * installer actually seeds with credentials and the one native-mode shell
+ * scripts (scan-purge, backup) read.
+ */
+const DOTENV_PATH = process.env.DOTENV_PATH || (isNative() ? '/etc/printershare/portal.env' : '/config/.env');
 
 /** Keys whose values are replaced with a placeholder when redacting. */
 const SENSITIVE_PATTERN = /pass|secret|token|key/i;

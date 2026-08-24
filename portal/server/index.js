@@ -8,11 +8,17 @@
  * keep it importable by test suites without binding a port.
  */
 
+// isNative() only reads process.env (CUPS_LOCAL / DEPLOYMENT_MODE, both set
+// by systemd's Environment= before node starts), so it's safe to check
+// before dotenv has run — needed here because the default env-file path
+// differs between native/LXC and Docker (see lib/env.js's DOTENV_PATH).
+const { MODE, isNative } = require('./lib/deployment');
+
 // Load .env FIRST so that all route modules read the correct env vars.
-require('dotenv').config({ path: process.env.DOTENV_PATH || '/config/.env' });
+const dotenvDefault = isNative() ? '/etc/printershare/portal.env' : '/config/.env';
+require('dotenv').config({ path: process.env.DOTENV_PATH || dotenvDefault });
 
 const app  = require('./app');
-const { MODE } = require('./lib/deployment');
 const { makeLogger } = require('./lib/logger');
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const log = makeLogger('startup');

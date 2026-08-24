@@ -76,6 +76,13 @@ const auditLog = makeLogger('audit');
 
 app.use((req, res, next) => {
   const start = Date.now();
+  // Capture method/path now, before any mounted sub-router runs — Express
+  // rewrites req.url (and therefore req.path) to be relative to the mount
+  // point while a sub-router handles the request, and by the time the
+  // async 'finish' event fires that rewrite is still in effect, so reading
+  // req.path live inside the callback silently logs the wrong (and
+  // wrongly-classified) path.
+  const { method, path } = req;
   res.on('finish', () => {
     const meta = {
       status: res.statusCode,
@@ -83,11 +90,11 @@ app.use((req, res, next) => {
       user:   req.user || 'anonymous',
       ip:     req.ip,
     };
-    const isMutation = req.method !== 'GET' && req.path.startsWith('/api/');
+    const isMutation = method !== 'GET' && path.startsWith('/api/');
     if (isMutation) {
-      auditLog.info(`${req.method} ${req.path}`, meta);
-    } else if (req.path !== '/api/v1/health') {
-      httpLog.debug(`${req.method} ${req.path}`, meta);
+      auditLog.info(`${method} ${path}`, meta);
+    } else if (path !== '/api/v1/health') {
+      httpLog.debug(`${method} ${path}`, meta);
     }
   });
   next();

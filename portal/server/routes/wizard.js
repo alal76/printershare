@@ -20,6 +20,7 @@ const { spawn, execSync, spawnSync } = require('node:child_process');
 const { sanitizePatch } = require('./settings');
 const { isNative, cupsCmd, scanCmd } = require('../lib/deployment');
 const quirks = require('../lib/device-quirks');
+const { DOTENV_PATH } = require('../lib/env');
 
 /** Allowed characters in a printer/scanner make field. */
 const SAFE_MAKE = /^[A-Za-z0-9 _-]{1,64}$/;
@@ -682,7 +683,11 @@ router.post('/rclone-auth', (req, res) => {
 
 router.post('/build', (req, res) => {
   const { config } = req.body || {};
-  const dotenvPath  = process.env.DOTENV_PATH  || (isNative() ? '/etc/printershare/portal.env' : '/config/.env');
+  // Single source of truth for this path lives in lib/env.js now — it used
+  // to be computed independently in three places and two of them (this one
+  // was fine; server/index.js and lib/env.js itself were not) had drifted
+  // to always default to the Docker path even in native mode.
+  const dotenvPath  = DOTENV_PATH;
   const composeFile = process.env.COMPOSE_FILE || '/config/docker-compose.yml';
 
   if (config) {
