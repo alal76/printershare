@@ -1153,12 +1153,24 @@ function saneSeesScanner() {
 
 /**
  * Detect whether a USB device with scan capability is currently attached.
- * Uses the existing parseUsbDevices() pipeline (sysfs + SANE + CUPS cross-ref).
+ * Uses the existing parseUsbDevices() pipeline, seeded with `lsusb` output
+ * (a required argument — calling it with none, as this used to, throws
+ * inside parseUsbDevices() and was silently swallowed by the catch below,
+ * so this always returned false regardless of what was actually attached).
+ *
+ * Deliberately *not* enriched with SANE cross-reference data the way
+ * GET /devices is: this check exists specifically for the case where SANE
+ * isn't currently seeing the device (that's the scenario runRecovery() is
+ * trying to diagnose), so relying on SANE's own view here would be
+ * circular. The static KNOWN_DEVICES database and description-keyword
+ * heuristic in parseUsbDevices() are enough to recognize a scan-capable
+ * device independent of SANE's live state.
  * @returns {boolean}
  */
 function hasScanCapableUsbDevice() {
   try {
-    const list = parseUsbDevices();
+    const usbRaw = run(['lsusb'], 5_000);
+    const list = parseUsbDevices(usbRaw);
     return Array.isArray(list) && list.some(d => d?.capabilities?.scan);
   } catch { return false; }
 }
