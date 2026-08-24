@@ -18,7 +18,18 @@
 #       explicit USB IDs — e.g. smfp — unlike auto-enumerate backends).
 #    4. Apply `scan.sane_blacklist`: comment out the named SANE backends in
 #       /etc/sane.d/dll.conf when the device's preferred backend is present.
-#    5. Print, one per line, every apt package referenced by matched entries
+#    5. Reconcile `print.ppd`: if an existing CUPS queue for this device's
+#       make has no PPD bound at all (a raw/driverless queue — this can
+#       happen even for devices explicitly marked `ipp_usb:false`, because
+#       `lpadmin -m everywhere` can return success without real driverless
+#       capability), apply the catalogued PPD to it. This is what makes the
+#       fix self-healing on an *already*-provisioned host, not just at
+#       first install — this script runs periodically via
+#       printershare-hotplug.timer, so a queue that regresses (or was
+#       already wrong before this catalogue entry existed) gets repaired
+#       on its own within one polling interval, not left broken until
+#       someone notices status reporting doesn't work and fixes it by hand.
+#    6. Print, one per line, every apt package referenced by matched entries
 #       so the caller can `xargs apt-get install` them.
 #
 #  Inputs (env vars, all optional):
@@ -92,6 +103,65 @@ emit_packages() {
     ' <<<"$rec"
 }
 
+# ── Resolve a catalogue print.ppd hint to a real file path ──────────────────
+# Mirrors the exact convention used in scripts/proxmox/install.sh:
+#   "suld:Samsung_SCX-3400_Series.ppd.gz"  → /usr/share/ppd/suld/<file>
+#   "/absolute/path/to/file.ppd"           → used as-is
+#   "everywhere" / "driverless"            → not a real PPD, skip
+resolve_ppd_hint() {
+    local hint="$1"
+    case "$hint" in
+        /*) [[ -r "$hint" ]] && echo "$hint" ;;
+        everywhere|driverless) : ;;
+        *:*)
+            local sub="${hint%%:*}" file="${hint#*:}"
+            local cand="/usr/share/ppd/$sub/$file"
+            [[ -r "$cand" ]] && echo "$cand"
+            ;;
+    esac
+}
+
+# ── Reconcile an existing CUPS queue's driver against the catalogue ─────────
+# For every currently-configured usb:// queue whose URI make matches this
+# device, apply the catalogued PPD if the queue doesn't already have one
+# bound (an empty/missing /etc/cups/ppd/<queue>.ppd — CUPS's own signal for
+# "no driver", checked directly rather than trusting lpadmin/lpinfo's exit
+# codes, which is exactly what let this class of bug through in the first
+# place). No-ops for devices without a `print.ppd` hint.
+reconcile_printer_ppd() {
+    local rec="$1"
+    local make ppd_hint ppd_file
+    make=$(jq -r '.make // empty' <<<"$rec")
+    ppd_hint=$(jq -r '.print.ppd // empty' <<<"$rec")
+    [[ -z "$make" || -z "$ppd_hint" ]] && return 0
+    command -v lpstat >/dev/null || return 0
+
+    ppd_file="$(resolve_ppd_hint "$ppd_hint")"
+    [[ -z "$ppd_file" ]] && return 0
+
+    while read -r queue uri; do
+        [[ -z "$queue" ]] && continue
+        shopt -s nocasematch
+        [[ "$uri" == usb://"$make"/* ]] || { shopt -u nocasematch; continue; }
+        shopt -u nocasematch
+
+        if [[ -s "/etc/cups/ppd/${queue}.ppd" ]]; then
+            continue  # already has a real driver bound
+        fi
+
+        if [[ "$APPLY_BLACKLIST" == "1" ]]; then
+            if lpadmin -p "$queue" -P "$ppd_file" 2>/tmp/.adq-lpadmin-err; then
+                info "print queue '$queue' had no driver bound — applied catalogued PPD ($ppd_file)"
+            else
+                warn "lpadmin -P $ppd_file failed for queue '$queue': $(cat /tmp/.adq-lpadmin-err 2>/dev/null)"
+            fi
+            rm -f /tmp/.adq-lpadmin-err
+        else
+            info "would apply PPD $ppd_file to queue '$queue' (dry-run)"
+        fi
+    done < <(lpstat -v 2>/dev/null | sed -n 's/^device for \([^:]*\): \(.*\)$/\1 \2/p')
+}
+
 # ── Main loop ───────────────────────────────────────────────────────────────
 declare -A SEEN_PKGS=()
 declare -A SEEN_VIDPID=()
@@ -135,6 +205,8 @@ while read -r vid pid; do
     elif [[ -n "$preferred" ]]; then
         info "preferred backend '$preferred' not installed yet — deferring blacklist"
     fi
+
+    reconcile_printer_ppd "$rec"
 
     while read -r pkg; do
         [[ -n "$pkg" ]] && SEEN_PKGS[$pkg]=1
