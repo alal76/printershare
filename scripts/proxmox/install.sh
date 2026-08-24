@@ -312,42 +312,67 @@ grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
 # catalogue for a device-specific PPD hint (`print.ppd`, e.g. "suld:..."),
 # resolves it under /usr/share/ppd/, and falls back to a fuzzy filename
 # search keyed by the printer model in the USB URI.
+#
+# The catalogue's `ipp_usb` flag is checked *before* attempting driverless,
+# not just as a post-hoc fallback: `lpadmin -m everywhere` can return exit
+# 0 for a USB printer that doesn't actually support driverless printing,
+# silently leaving a raw/driver-less queue behind (no PPD → no paper-out,
+# jam, or toner status ever reaches CUPS, let alone the portal). That
+# exact failure mode shipped on a real deployment of this Samsung model —
+# `ipp_usb` was already correctly recorded as `false` in the catalogue,
+# but nothing consulted it until after trusting a misleading exit code.
 info "Detecting USB printers"
 sleep 2  # give cups time to enumerate after restart
 PRINTER_URI="$(lpinfo -v 2>/dev/null | awk '/^direct usb:/{print $2; exit}')"
 if [[ -n "$PRINTER_URI" ]] && ! lpstat -p 2>/dev/null | grep -q '^printer .* USB'; then
     PRINTER_NAME="$(echo "$PRINTER_URI" | sed -E 's|.*/([^?]+).*|\1|; s/[^A-Za-z0-9_-]/_/g')"
     info "Adding CUPS queue $PRINTER_NAME → $PRINTER_URI"
-    # 1. Try driverless / IPP-everywhere — works for most modern devices.
-    if ! lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -m everywhere 2>/dev/null; then
-        PPD=""
-        # 2. Quirks-catalogue lookup: take the first matched device's
-        #    print.ppd hint and resolve it to a real file.
-        if command -v jq >/dev/null && [[ -r "$REPO_DIR/portal/server/data/device-quirks.json" ]]; then
-            QCAT="$REPO_DIR/portal/server/data/device-quirks.json"
-            while read -r vid pid; do
-                KEY="${vid,,}:${pid,,}"
-                HINT="$(jq -r --arg k "$KEY" --arg v "${vid,,}:*" \
-                    '.devices[$k].print.ppd // .devices[$v].print.ppd // empty' "$QCAT")"
-                [[ -z "$HINT" ]] && continue
-                # Hint formats:
-                #   "suld:Samsung_SCX-3400_Series.ppd.gz"  → /usr/share/ppd/suld/<file>
-                #   "/absolute/path/to/file.ppd"           → use as-is
-                #   "everywhere" / "driverless"            → already tried above
-                case "$HINT" in
-                    /*)         [[ -r "$HINT" ]] && PPD="$HINT" ;;
-                    everywhere|driverless) : ;;
-                    *:*)
-                        sub="${HINT%%:*}"
-                        file="${HINT#*:}"
-                        cand="/usr/share/ppd/$sub/$file"
-                        [[ -r "$cand" ]] && PPD="$cand"
-                        ;;
-                esac
-                [[ -n "$PPD" ]] && break
-            done < <(lsusb | grep -oE 'ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}' | sed -E 's/^ID //; s/:/ /')
-        fi
-        # 3. Last-ditch: fuzzy search by model name embedded in the USB URI.
+
+    # 0. Quirks-catalogue lookup, done up front: take the first matched
+    #    device's print.ppd hint (resolved to a real file) and its
+    #    ipp_usb flag together, from the same record.
+    PPD=""
+    IPP_USB_OK=""
+    if command -v jq >/dev/null && [[ -r "$REPO_DIR/portal/server/data/device-quirks.json" ]]; then
+        QCAT="$REPO_DIR/portal/server/data/device-quirks.json"
+        while read -r vid pid; do
+            KEY="${vid,,}:${pid,,}"
+            RECORD="$(jq -c --arg k "$KEY" --arg v "${vid,,}:*" \
+                '.devices[$k] // .devices[$v] // empty' "$QCAT")"
+            [[ -z "$RECORD" ]] && continue
+            IPP_USB_OK="$(jq -r '.ipp_usb // empty' <<<"$RECORD")"
+            HINT="$(jq -r '.print.ppd // empty' <<<"$RECORD")"
+            [[ -z "$HINT" ]] && continue
+            # Hint formats:
+            #   "suld:Samsung_SCX-3400_Series.ppd.gz"  → /usr/share/ppd/suld/<file>
+            #   "/absolute/path/to/file.ppd"           → use as-is
+            #   "everywhere" / "driverless"            → handled by the -m everywhere attempt below
+            case "$HINT" in
+                /*)         [[ -r "$HINT" ]] && PPD="$HINT" ;;
+                everywhere|driverless) : ;;
+                *:*)
+                    sub="${HINT%%:*}"
+                    file="${HINT#*:}"
+                    cand="/usr/share/ppd/$sub/$file"
+                    [[ -r "$cand" ]] && PPD="$cand"
+                    ;;
+            esac
+            [[ -n "$PPD" ]] && break
+        done < <(lsusb | grep -oE 'ID [0-9a-fA-F]{4}:[0-9a-fA-F]{4}' | sed -E 's/^ID //; s/:/ /')
+    fi
+
+    if [[ "$IPP_USB_OK" == "false" && -n "$PPD" ]]; then
+        # The catalogue already knows driverless won't work for this
+        # device and has the right driver on file — use it directly
+        # instead of probing -m everywhere at all.
+        info "Using catalogued PPD (ipp_usb:false): $PPD"
+        lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -P "$PPD" || \
+            warn "lpadmin failed with PPD $PPD"
+    elif ! lpadmin -p "$PRINTER_NAME" -E -v "$PRINTER_URI" -m everywhere 2>/dev/null; then
+        # Driverless failed outright (a real non-zero exit, not the
+        # silent-success case above) — fall back to whatever PPD the
+        # catalogue lookup found, or a last-ditch fuzzy filename search
+        # keyed by the model name embedded in the USB URI.
         if [[ -z "$PPD" ]]; then
             MODEL="$(echo "$PRINTER_URI" | sed -E 's|.*/||; s/[?].*//; s/%20/ /g')"
             PPD="$(find /usr/share/ppd /opt -iname "*${MODEL// /*}*.ppd*" 2>/dev/null | head -1)"
