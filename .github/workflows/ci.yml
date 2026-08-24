@@ -103,7 +103,7 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: portal
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run E2E tests
         working-directory: portal

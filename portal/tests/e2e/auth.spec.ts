@@ -34,10 +34,11 @@ test.describe('Auth — disabled mode (default)', () => {
     await expect(page).toHaveURL(/\/dashboard/)
   })
 
-  test('/login is accessible and does not loop', async ({ page }) => {
+  test('/login redirects to /dashboard when auth is disabled', async ({ page }) => {
+    // There's nothing to log into when auth is off — the router guard sends
+    // /login straight to /dashboard (a single redirect, not a loop).
     await page.goto('/login')
-    await expect(page).toHaveURL(/\/login/)
-    await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible()
+    await expect(page).toHaveURL(/\/dashboard/)
   })
 })
 
@@ -64,13 +65,23 @@ test.describe('Auth — enabled mode', () => {
   })
 
   test('login form submits credentials and redirects on success', async ({ page }) => {
-    await page.route('/api/v1/auth/login', route =>
-      route.fulfill({ json: { ok: true, authEnabled: true, user: 'admin' } }),
-    )
-    // After successful login, me returns authenticated
-    await page.route('/api/v1/auth/me', route =>
-      route.fulfill({ json: { authenticated: true, authEnabled: true, user: 'admin' } }),
-    )
+    // /auth/me must stay unauthenticated until login actually succeeds —
+    // the router guard redirects an already-"authenticated" visitor away
+    // from /login before the form can be filled in, so this has to mirror
+    // the logout test's flag-flip pattern rather than eagerly reporting
+    // authenticated:true from the start.
+    let authenticated = false
+    await page.route('/api/v1/auth/me', route => {
+      if (authenticated) {
+        route.fulfill({ json: { authenticated: true, authEnabled: true, user: 'admin' } })
+      } else {
+        route.fulfill({ status: 401, json: { authenticated: false, authEnabled: true } })
+      }
+    })
+    await page.route('/api/v1/auth/login', route => {
+      authenticated = true
+      route.fulfill({ json: { ok: true, authEnabled: true, user: 'admin' } })
+    })
     await page.route('/api/v1/health',        route => route.fulfill({ json: { status: 'ok', services: {} } }))
     await page.route('/api/v1/devices',       route => route.fulfill({ json: { usb: [], printers: [] } }))
     await page.route('/api/v1/scans',         route => route.fulfill({ json: { files: [] } }))
