@@ -341,17 +341,42 @@ router.get('/', (_req, res) => {
  *   device `xerox_mfp:libusb:001:002' is a Samsung SCX-3400 Series ...
  * @returns {Array<{device:string, vendor:string, model:string, type:string}>}
  */
+// `scanimage -L` is expensive — sane-airscan's eSCL/WS-Discovery probing
+// alone routinely takes 8-11s, measured live (a device with both a USB
+// and a network/airscan entry is worst-case, since both backends get
+// probed). Under Node's single-threaded event loop, every spawnSync call
+// this slow blocks *all* other requests for its full duration, not just
+// the caller's — confirmed live: a /health request fired 0.5s after a
+// /devices request wasn't served until the /devices request's own
+// spawnSync finished, ~8s later. With GET /devices polled every 30s from
+// the Dashboard, that's a large fraction of the portal's time spent
+// completely unresponsive. Caching the raw probe result is the direct
+// fix: polling this often doesn't need genuinely fresh data every time.
+const SANE_RAW_CACHE_TTL_MS = 15_000;
+let _saneRawCache = null; // { ts: number, raw: string }
+
 /**
- * Run `scanimage -L` once and return its combined stdout+stderr. Helpers
- * that need different views of the data (scanner descriptors / USB
- * bus:device pairs) parse this raw output instead of re-invoking the CLI.
+ * Run `scanimage -L` (cached — see above) and return its combined
+ * stdout+stderr. Helpers that need different views of the data (scanner
+ * descriptors / USB bus:device pairs) parse this raw output instead of
+ * re-invoking the CLI.
  * @returns {string}
  */
 function collectSaneRaw() {
+  const now = Date.now();
+  if (_saneRawCache && (now - _saneRawCache.ts) < SANE_RAW_CACHE_TTL_MS) {
+    return _saneRawCache.raw;
+  }
   try {
     const { cmd, args } = scanCmd(['scanimage', '-L']);
-    const r = spawnSync(cmd, args, { timeout: 10_000, encoding: 'utf8' });
-    return (r.stdout || '') + (r.stderr || '');
+    // Generous timeout — the command itself has been observed taking
+    // ~10.7s; the previous 10_000ms bound was shorter than that, meaning
+    // spawnSync's SIGTERM could truncate mid-flush rather than the
+    // command ever completing cleanly.
+    const r = spawnSync(cmd, args, { timeout: 20_000, encoding: 'utf8' });
+    const raw = (r.stdout || '') + (r.stderr || '');
+    _saneRawCache = { ts: now, raw };
+    return raw;
   } catch {
     return '';
   }
