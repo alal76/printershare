@@ -258,43 +258,85 @@
           <div
             v-for="printer in devices.printers"
             :key="printer.name"
-            class="p-2 rounded-xl border border-gray-100"
+            class="p-2 rounded-xl border border-gray-100 flex items-center gap-3"
           >
-            <p class="text-sm font-medium text-gray-900 truncate">
-              {{ printer.name }}
-            </p>
-            <p class="text-xs text-gray-500 truncate">
-              {{ printer.uri }}
-            </p>
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+              :class="printerIconBg(printer)"
+            >
+              <PrinterIcon
+                class="w-4 h-4"
+                :class="printerIconColor(printer)"
+              />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="text-sm font-medium text-gray-900 truncate">
+                  {{ printer.name }}
+                </p>
+                <StatusBadge
+                  :status="printerStatus(printer)"
+                  :label="printerLabel(printer)"
+                />
+                <span
+                  v-if="driverConcerning(printer)"
+                  class="text-xs font-medium text-amber-700 bg-amber-50 rounded px-1.5 py-0.5"
+                  title="No driver bound — this printer can't report paper-out, jam, or toner status."
+                >⚠ No driver</span>
+              </div>
+              <p class="text-xs text-gray-500 truncate">
+                {{ printer.driverName || printer.uri }}
+              </p>
+            </div>
           </div>
         </div>
       </Card>
 
       <Card>
-        <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">
-          Scanners / USB Devices
-        </h2>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Scanners
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            @click="$router.push('/devices')"
+          >
+            Manage
+          </Button>
+        </div>
         <div
-          v-if="devices.usb.length === 0"
+          v-if="devices.scanners.length === 0"
           class="text-sm text-gray-500"
         >
-          No USB scanner/printer devices detected.
+          No scanners detected.
         </div>
         <div
           v-else
           class="space-y-2"
         >
           <div
-            v-for="usb in devices.usb"
-            :key="usb.vidpid"
-            class="p-2 rounded-xl border border-gray-100"
+            v-for="scanner in devices.scanners"
+            :key="scanner.device"
+            class="p-2 rounded-xl border border-gray-100 flex items-center gap-3"
           >
-            <p class="text-sm font-medium text-gray-900 truncate">
-              {{ usb.name }}
-            </p>
-            <p class="text-xs text-gray-500">
-              {{ usb.vidpid }}
-            </p>
+            <div class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center flex-shrink-0">
+              <ScanIcon class="w-4 h-4 text-green-600" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="text-sm font-medium text-gray-900 truncate">
+                  {{ scanner.vendor }} {{ scanner.model }}
+                </p>
+                <span
+                  v-if="scanner.default"
+                  class="text-xs font-medium text-blue-600 bg-blue-50 rounded px-1.5 py-0.5"
+                >Default</span>
+              </div>
+              <p class="text-xs text-gray-500 truncate">
+                {{ scanner.device }} · {{ scanner.type }}
+              </p>
+            </div>
           </div>
         </div>
       </Card>
@@ -517,11 +559,13 @@ import AppShell   from '@/components/layout/AppShell.vue'
 import Button     from '@/components/ui/Button.vue'
 import Card       from '@/components/ui/Card.vue'
 import Modal      from '@/components/ui/Modal.vue'
+import StatusBadge from '@/components/ui/StatusBadge.vue'
 import FileList   from '@/components/scan/FileList.vue'
 import { useSystemStore } from '@/stores/system'
 import { useScanStore }   from '@/stores/scan'
 import { usePrintStore }  from '@/stores/print'
 import { useDevicesStore } from '@/stores/devices'
+import { usePrinterStatus } from '@/composables/usePrinterStatus'
 import { useApi }         from '@/composables/useApi'
 
 interface JobsSnapshot {
@@ -533,6 +577,7 @@ const system = useSystemStore()
 const scan   = useScanStore()
 const print  = usePrintStore()
 const devices = useDevicesStore()
+const { printerStatus, printerLabel, printerIconBg, printerIconColor, driverConcerning } = usePrinterStatus()
 const jobsApi = useApi<JobsSnapshot>()
 const jobs = ref<JobsSnapshot | null>(null)
 let jobsTimer: ReturnType<typeof setInterval> | null = null

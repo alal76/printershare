@@ -30,6 +30,8 @@ export interface CupsPrinter {
   info:         string
   jobCount:     number
   default:      boolean
+  hasDriver:    boolean
+  driverName:   string | null
 }
 
 export type PrinterAction = 'enable' | 'disable' | 'accept' | 'reject' | 'cancel-jobs' | 'resume'

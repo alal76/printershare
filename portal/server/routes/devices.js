@@ -178,6 +178,43 @@ function getRichPrinterInfo() {
 }
 
 /**
+ * Whether a real driver/PPD is bound to a CUPS queue, as opposed to a
+ * raw/driverless queue that has no channel to report status (paper-out,
+ * jam, toner) back to CUPS at all — the exact condition a Samsung ULD
+ * printer on this deployment was silently stuck in until it was found and
+ * fixed by hand. Checked directly against the PPD file CUPS itself
+ * maintains, the same signal `apply-device-quirks.sh`'s reconciliation
+ * uses, rather than inferring it from `lpoptions`/`lpadmin` exit codes.
+ * @param {string} name
+ * @returns {boolean}
+ */
+function printerHasDriver(name) {
+  try {
+    runCups(['test', '-s', `/etc/cups/ppd/${name}.ppd`], 3_000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The human-readable driver/model name declared inside a bound PPD (its
+ * `*NickName` field), e.g. "Samsung SCX-3400 Series". Null for a
+ * driverless queue or one with no PPD bound at all.
+ * @param {string} name
+ * @returns {string | null}
+ */
+function printerDriverName(name) {
+  try {
+    const out = runCups(['grep', '-m1', '^*NickName', `/etc/cups/ppd/${name}.ppd`], 3_000);
+    const m = /^\*NickName:\s*"([^"]+)"/.exec(out);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Get active job counts per printer.
  * @returns {Record<string, number>}
  */
@@ -285,6 +322,8 @@ router.get('/', (_req, res) => {
         info:         rich.info,
         jobCount:     jobCounts[name] ?? 0,
         default:      name === defaultName,
+        hasDriver:    printerHasDriver(name),
+        driverName:   printerDriverName(name),
       });
     }
   } catch { /* CUPS not available */ }

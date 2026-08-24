@@ -106,12 +106,23 @@
                     v-if="p.jobCount > 0"
                     class="text-xs text-blue-600 font-medium"
                   >{{ p.jobCount }} job{{ p.jobCount !== 1 ? 's' : '' }}</span>
+                  <span
+                    v-if="driverConcerning(p)"
+                    class="badge-amber"
+                    title="No driver bound — this printer can't report paper-out, jam, or toner status. Add a driver via Settings on this card, or the driver search when adding it."
+                  >⚠ No driver</span>
                 </div>
                 <p
                   v-if="p.statusMsg"
                   class="text-xs text-amber-600 font-medium mt-0.5"
                 >
                   ⚠ {{ p.statusMsg }}
+                </p>
+                <p
+                  v-else-if="p.driverName"
+                  class="text-xs text-gray-400 truncate mt-0.5"
+                >
+                  {{ p.driverName }}
                 </p>
                 <p
                   v-else
@@ -851,11 +862,12 @@ import Button     from '@/components/ui/Button.vue'
 import Modal      from '@/components/ui/Modal.vue'
 import StatusBadge from '@/components/ui/StatusBadge.vue'
 import { useDevicesStore, testPrintDevice, printerActionFn, fetchPrinterAttributesFn, setPrinterOptionFn, searchDrivers } from '@/stores/devices'
-import type { UsbDevice, CupsPrinter, PrinterOption, DriverOption } from '@/stores/devices'
+import type { UsbDevice, PrinterOption, DriverOption } from '@/stores/devices'
 import { useToastStore }  from '@/stores/toast'
 import { RouterLink } from 'vue-router'
+import { usePrinterStatus } from '@/composables/usePrinterStatus'
 
-type SvcStatus = 'ok' | 'warning' | 'error' | 'pending' | 'offline' | 'unknown'
+const { printerStatus, printerLabel, printerIconBg, printerIconColor, driverConcerning } = usePrinterStatus()
 
 const devices = useDevicesStore()
 const toast   = useToastStore()
@@ -1041,40 +1053,6 @@ async function onReset() {
   }
 }
 
-function printerStatus(p: CupsPrinter): SvcStatus {
-  if (p.stateReasons.some(r => /media.empty|jam|toner.empty|ink.empty|cover.open|door.open/i.test(r))) return 'error'
-  if (p.stateReasons.some(r => /media.low|toner.low|ink.low/i.test(r))) return 'warning'
-  if (p.state === 'idle')     return 'ok'
-  if (p.state === 'busy')     return 'pending'
-  if (p.state === 'disabled') return 'offline'
-  return 'unknown'
-}
-
-function printerLabel(p: CupsPrinter): string {
-  if (p.statusMsg) return p.statusMsg
-  if (p.state === 'disabled') return 'Paused'
-  return p.state
-}
-
-function printerIconBg(p: CupsPrinter) {
-  const s = printerStatus(p)
-  if (s === 'error')   return 'bg-red-50'
-  if (s === 'warning') return 'bg-amber-50'
-  if (p.state === 'idle')     return 'bg-green-50'
-  if (p.state === 'busy')     return 'bg-blue-50'
-  if (p.state === 'disabled') return 'bg-gray-100'
-  return 'bg-gray-100'
-}
-function printerIconColor(p: CupsPrinter) {
-  const s = printerStatus(p)
-  if (s === 'error')   return 'text-red-500'
-  if (s === 'warning') return 'text-amber-500'
-  if (p.state === 'idle')     return 'text-green-600'
-  if (p.state === 'busy')     return 'text-blue-600'
-  if (p.state === 'disabled') return 'text-gray-400'
-  return 'text-gray-400'
-}
-
 async function onPrinterAction(name: string, action: string) {
   const key = `${name}:${action}`
   actionLoading.value = key
@@ -1194,4 +1172,5 @@ const protocols = [
 .badge-green  { @apply text-xs bg-green-50 text-green-600 rounded px-1.5 py-0.5 font-medium; }
 .badge-purple { @apply text-xs bg-purple-50 text-purple-600 rounded px-1.5 py-0.5 font-medium; }
 .badge-gray   { @apply text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 font-medium; }
+.badge-amber  { @apply text-xs bg-amber-50 text-amber-700 rounded px-1.5 py-0.5 font-medium; }
 </style>
