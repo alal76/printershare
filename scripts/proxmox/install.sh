@@ -54,7 +54,8 @@ else
 fi
 
 # ── Locale (avoid perl warnings during apt) ─────────────────────────────────
-if ! locale -a 2>/dev/null | grep -qi '^en_US\.utf-\?8$'; then
+_locales="$(locale -a 2>/dev/null || true)"
+if ! grep -qi '^en_US\.utf-\?8$' <<<"$_locales"; then
     info "Generating en_US.UTF-8 locale"
     apt-get install -y --no-install-recommends locales >/dev/null
     sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
@@ -324,7 +325,8 @@ grep -q '^0\.0\.0\.0/0' /etc/sane.d/saned.conf 2>/dev/null || \
 info "Detecting USB printers"
 sleep 2  # give cups time to enumerate after restart
 PRINTER_URI="$(lpinfo -v 2>/dev/null | awk '/^direct usb:/{print $2; exit}')"
-if [[ -n "$PRINTER_URI" ]] && ! lpstat -p 2>/dev/null | grep -q '^printer .* USB'; then
+_lpstat_p="$(lpstat -p 2>/dev/null || true)"
+if [[ -n "$PRINTER_URI" ]] && ! grep -q '^printer .* USB' <<<"$_lpstat_p"; then
     PRINTER_NAME="$(echo "$PRINTER_URI" | sed -E 's|.*/([^?]+).*|\1|; s/[^A-Za-z0-9_-]/_/g')"
     info "Adding CUPS queue $PRINTER_NAME → $PRINTER_URI"
 

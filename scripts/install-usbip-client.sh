@@ -59,7 +59,8 @@ ln -sf "$USBIP_PATH" /usr/local/sbin/usbip
 
 # ── 4. Probe the remote server ────────────────────────────────────────────
 echo "==> Probing $SERVER_IP for $BUSID..."
-if ! "$USBIP_PATH" list -r "$SERVER_IP" 2>/dev/null | grep -q "${BUSID}:"; then
+_usbip_list="$("$USBIP_PATH" list -r "$SERVER_IP" 2>/dev/null || true)"
+if ! grep -q "${BUSID}:" <<<"$_usbip_list"; then
     echo "WARNING: busid $BUSID not currently exported by $SERVER_IP."
     echo "         The systemd unit will retry on every restart."
 fi
@@ -104,7 +105,8 @@ systemctl enable --now "usbip-attach@${INSTANCE}.service"
 sleep 2
 echo
 echo "==> Result:"
-if "$USBIP_PATH" port 2>/dev/null | grep -q "Remote busid"; then
+_usbip_port="$("$USBIP_PATH" port 2>/dev/null || true)"
+if grep -q "Remote busid" <<<"$_usbip_port"; then
     "$USBIP_PATH" port
     echo
     echo "==> Devices visible on this host:"

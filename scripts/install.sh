@@ -136,7 +136,8 @@ if [[ -n "$TIMEZONE" && "$TIMEZONE" != "$CURRENT_TZ" ]]; then
 fi
 
 # ── 0d. Locale ────────────────────────────────────────────────────────────
-if ! locale -a 2>/dev/null | grep -qi '^en_US\.utf-\?8$'; then
+_locales="$(locale -a 2>/dev/null || true)"
+if ! grep -qi '^en_US\.utf-\?8$' <<<"$_locales"; then
   msg_info "Generating en_US.UTF-8 locale..."
   apt-get install -y --no-install-recommends locales -qq
   sed -i 's/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen

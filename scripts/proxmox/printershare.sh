@@ -236,7 +236,8 @@ if [[ "$ACTION" == "update" ]]; then
     verify_lxc_config "$ARG_CTID"
     msg_ok "Config OK"
 
-    if pct status "$ARG_CTID" 2>/dev/null | grep -q running; then
+    _ct_status="$(pct status "$ARG_CTID" 2>/dev/null || true)"
+    if grep -q running <<<"$_ct_status"; then
         msg_info "Restarting CT $ARG_CTID to pick up config changes"
         pct reboot "$ARG_CTID" 2>/dev/null || { pct stop "$ARG_CTID" || true; pct start "$ARG_CTID"; }
     else
@@ -344,7 +345,8 @@ pveam update >/dev/null 2>&1 || true
 TEMPLATE="$(pveam available -section system | awk '/debian-12-standard/ {print $2}' | sort -V | tail -1)"
 [[ -z "$TEMPLATE" ]] && die "No debian-12-standard template available. Run: pveam update"
 
-if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
+_pveam_list="$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null || true)"
+if ! grep -q "$TEMPLATE" <<<"$_pveam_list"; then
     msg_info "Downloading $TEMPLATE to $TEMPLATE_STORAGE"
     pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"
 fi

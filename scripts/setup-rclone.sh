@@ -20,8 +20,9 @@ command -v rclone &>/dev/null || {
 }
 
 if [[ "$MODE" == "--test" ]]; then
+    _remotes="$(rclone listremotes)"
     for REMOTE in "$GDRIVE_REMOTE" "$ONEDRIVE_REMOTE"; do
-        if rclone listremotes | grep -qE "^${REMOTE}:"; then
+        if grep -qE "^${REMOTE}:" <<<"$_remotes"; then
             echo -n "  [${REMOTE}] Testing... "
             rclone lsd "${REMOTE}:" --max-depth 1 &>/dev/null && echo "OK" || echo "FAILED"
         else
@@ -33,7 +34,8 @@ fi
 
 configure_remote() {
     local REMOTE="$1" LABEL="$2"
-    if rclone listremotes 2>/dev/null | grep -qE "^${REMOTE}:"; then
+    local _remotes; _remotes="$(rclone listremotes 2>/dev/null || true)"
+    if grep -qE "^${REMOTE}:" <<<"$_remotes"; then
         read -rp "  Remote '${REMOTE}' exists. Reconfigure? [y/N]: " R
         [[ ! "$R" =~ ^[Yy]$ ]] && return
     fi
@@ -54,7 +56,8 @@ read -rp "Configure Microsoft OneDrive? [Y/n]: " R
 [[ ! "$R" =~ ^[Nn]$ ]] && configure_remote "$ONEDRIVE_REMOTE" "Microsoft OneDrive"
 
 for REMOTE in "$GDRIVE_REMOTE" "$ONEDRIVE_REMOTE"; do
-    rclone listremotes 2>/dev/null | grep -qE "^${REMOTE}:" && \
+    _remotes="$(rclone listremotes 2>/dev/null || true)"
+    grep -qE "^${REMOTE}:" <<<"$_remotes" && \
         rclone mkdir "${REMOTE}:Scans" 2>/dev/null && \
         echo "  Created ${REMOTE}:Scans" || true
 done
