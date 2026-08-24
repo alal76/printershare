@@ -1,5 +1,6 @@
 .env
 .env.local
+.ct-credentials.local
 *.log
 
 # Node

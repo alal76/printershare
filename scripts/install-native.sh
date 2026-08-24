@@ -95,6 +95,27 @@ install -o root -g root -m 755 \
     "$(dirname "$0")/../scanservjs/scripts/scan-save-upload.sh" \
     /usr/local/bin/scan-save-upload.sh
 
+# ── USB hotplug driver detection ────────────────────────────────────────
+# Polls (every 20s) for USB device-set changes and re-runs the
+# device-quirks catalogue against them, so a printer/scanner swapped in
+# after this install gets its driver installed automatically instead of
+# needing a re-run of this script. A systemd timer is used instead of a
+# udev rule so the same mechanism also works inside an unprivileged
+# Proxmox LXC container (see scripts/proxmox/install.sh), where
+# systemd-udevd cannot run because /sys is not writable.
+info "Installing USB hotplug driver detection..."
+install -o root -g root -m 755 \
+    "$(dirname "$0")/printershare-hotplug.sh" \
+    /usr/local/bin/printershare-hotplug.sh
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/printershare-hotplug.service" \
+    /etc/systemd/system/printershare-hotplug.service
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/printershare-hotplug.timer" \
+    /etc/systemd/system/printershare-hotplug.timer
+systemctl daemon-reload
+systemctl enable --now printershare-hotplug.timer
+
 # ── CUPS ─────────────────────────────────────────────────────────────────
 info "Configuring CUPS..."
 cp "$(dirname "$0")/../cups/cupsd.conf" /etc/cups/cupsd.conf

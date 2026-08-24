@@ -108,7 +108,7 @@ Step-by-step:
 | **Passwords** | Sets Samba share password |
 | **Network** | Confirms nginx ports and CUPS connection |
 | **Cloud** | Optional: configure rclone remote for Google Drive or OneDrive |
-| **Remote Access** | Optional: Tailscale auth key + Cloudflare tunnel token |
+| **Remote Access** | Optional: Tailscale auth key + Cloudflare tunnel token (or connect Tailscale later via browser login in Settings — see §8) |
 | **Confirm** | Applies device quirks, creates CUPS queue, starts all services |
 
 You can re-run the wizard at any time from the portal settings page, or reset it:
@@ -144,6 +144,25 @@ sudo lpadmin -p MyPrinter -E -v ipp://${HOST_IP}:631/printers/USB-Printer -m eve
 lpoptions -d MyPrinter
 echo "test" | lp
 ```
+
+### 5.5 Setting a default printer
+
+If you have more than one printer configured, open **Devices** in the portal and click the
+star icon on the printer you want as default. Only the *first* printer you add claims the
+default slot automatically — adding a second or third printer never silently changes it.
+
+### 5.6 Adding an older network printer (no driverless/IPP Everywhere support)
+
+Most modern network printers support driverless printing and just need their IPP address
+(§5.1–5.4). For an older printer that only exposes raw JetDirect (port 9100) or LPD:
+
+1. Open **Devices → Add Network Printer**
+2. Enter a name and the address as `socket://<printer-ip>:9100` or `lpd://<printer-ip>/queue`
+3. Under **Driver**, search for the printer's make/model (searches the ~14,000 PPDs already
+   installed via foomatic-db/gutenprint/hplip) and pick a match
+4. If nothing matches and you have a `.ppd` file from the manufacturer's site, add the
+   printer first (it gets a generic PostScript driver as a placeholder), then open its
+   **Settings → Change Driver** and upload the `.ppd` there
 
 ---
 
@@ -191,6 +210,30 @@ Expand the **Advanced** section to enable optional filters applied during scan:
 Selecting **OCR → PDF** or **OCR → text** runs Tesseract OCR on the scanned image
 and embeds a searchable text layer (requires Tesseract to be installed on the host).
 
+### 6.6 Setting a default scanner
+
+If more than one scanner is visible (e.g. a USB scanner plus its own eSCL network
+loopback, or several devices), open **Devices** and click the star icon on the one you
+want the Scan page to use by default. Without this, the portal just uses whichever
+device SANE happens to enumerate first — not necessarily a stable choice.
+
+### 6.7 Adding a network scanner on a different subnet/VLAN
+
+Scanners on the same network segment as the host are found automatically (no setup
+needed). For a scanner on a different subnet or VLAN — where mDNS auto-discovery can't
+reach it — register it manually:
+
+1. Open **Devices → Network Scanners → Add**
+2. Enter a name, its eSCL or WSD URL (e.g. `http://192.168.1.102:9095/eSCL`), and protocol
+3. It will then appear in the Scanners list like any auto-discovered device
+
+### 6.8 Scanning from other devices on the network
+
+The attached scanner is exposed to other devices via eSCL/AirScan automatically — see the
+[README's Client Setup section](README.md#scanning-from-other-devices) for per-OS
+details. In short: macOS, iOS, and Linux discover it with no configuration; Windows needs
+the free **Windows Scan** Store app (no native WSD support in this stack).
+
 ---
 
 ## 7. Scan file access
@@ -234,6 +277,18 @@ After changing the env file in native mode, restart the portal:
 ```bash
 systemctl restart printershare-portal
 ```
+
+### Connecting Tailscale via browser login
+
+The easiest way to enable Tailscale doesn't need an auth key at all:
+
+1. Open **Settings → Tailscale → Connect via Browser**
+2. Click the link that appears and finish signing in — on your phone, laptop, or any
+   device, it doesn't have to be the PrinterShare host itself
+3. The Settings page updates automatically once you're connected
+
+The **Tailscale Auth Key** field further down (under "Remote Access (Advanced)") is still
+available for unattended/scripted provisioning, but isn't needed for normal setup.
 
 ---
 
@@ -279,6 +334,23 @@ scanimage -L              # confirm SANE can see the scanner
 ```
 
 If still missing: unplug and replug the cable, wait 5 seconds, retry.
+
+### A newly plugged-in printer/scanner has no driver
+
+The hotplug timer checks for USB changes every 20s and installs any matching driver
+package automatically — no re-run of the installer needed. Check it's running and see
+what it did:
+
+```bash
+systemctl status printershare-hotplug.timer
+journalctl -t printershare-hotplug -n 30
+```
+
+If the device isn't in the quirks catalogue at all, use the **Devices** page: for
+printers, search the driver catalogue or upload a vendor `.ppd` (see §5.6); for network
+scanners on a different subnet, register it manually (see §6.7). There's no equivalent
+manual-driver option for USB scanners — SANE backends are native code, not something
+safe to accept as an upload; if apt has no matching package, the device isn't supported.
 
 ### Cannot log in to the portal
 

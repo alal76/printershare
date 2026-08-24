@@ -205,6 +205,27 @@ fi
 # scan.sane_blacklist entries to /etc/sane.d/dll.conf, and prints the union
 # of apt packages those devices need. Adding a new device fix is a JSON
 # edit — no shell changes required.
+# ── USB hotplug driver detection ────────────────────────────────────────
+# Polls (every 20s) for USB device-set changes and re-runs the quirks
+# catalogue against them, so a printer/scanner swapped in after this
+# install gets its driver installed automatically instead of needing a
+# manual re-run of this script. Uses a systemd timer rather than a udev
+# rule: inside an unprivileged LXC container /sys is not writable, so
+# systemd-udevd cannot run and udev rules never fire — polling `lsusb` is
+# the mechanism that actually works here.
+info "Installing USB hotplug driver detection..."
+install -o root -g root -m 755 \
+    "$REPO_DIR/scripts/printershare-hotplug.sh" \
+    /usr/local/bin/printershare-hotplug.sh
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/printershare-hotplug.service" \
+    /etc/systemd/system/printershare-hotplug.service
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/printershare-hotplug.timer" \
+    /etc/systemd/system/printershare-hotplug.timer
+systemctl daemon-reload
+systemctl enable --now printershare-hotplug.timer
+
 info "Applying device quirks (per portal/server/data/device-quirks.json)"
 QUIRK_PKGS="$("$REPO_DIR/scripts/apply-device-quirks.sh" || true)"
 if [[ -n "$QUIRK_PKGS" ]]; then

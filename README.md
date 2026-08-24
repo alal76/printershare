@@ -18,15 +18,21 @@ for scanning, job management, and configuration.
 | 🧙 **Setup Wizard** | 7-step guided first-run (USB detection, passwords, network, cloud, remote access) |
 | 🖥 **CUPS web UI** | Proxied at `/cups/` |
 | ☁️ **Cloud backup** | rclone auto-upload of scans (Google Drive + OneDrive) |
-| 🌐 **Remote access** | Tailscale VPN + Cloudflare Tunnel (optional) |
+| 🌐 **Remote access** | Tailscale VPN (browser login or auth key) + Cloudflare Tunnel (optional) |
 | 📱 **Mobile-first PWA** | Vue 3 progressive web app with bottom navigation |
 | 🔧 **Device quirks catalogue** | JSON-driven per-device driver/SANE-backend fix table |
+| 🔌 **USB hotplug detection** | Polls for USB changes every 20s and installs matching drivers automatically — no re-run of the installer needed |
+| 🖨️ **Default printer/scanner** | Explicit "set as default" for both, instead of last-added-wins |
+| 🔍 **Driver catalogue search** | Searches the ~14k installed PPDs (foomatic-db + gutenprint + hplip) for printers without driverless support |
+| 📎 **PPD upload** | Apply a vendor-supplied `.ppd` directly for printers with no packaged driver |
+| 🖨️ **Non-driverless network printers** | `socket://` (raw/JetDirect) and `lpd://` printers, with driver picker |
+| 🌐 **Static network scanners** | Register an eSCL/WSD scanner outside the mDNS broadcast domain (different subnet/VLAN) |
 
 ---
 
 ## Architecture
 
-\`\`\`
+```
 USB Printer/Scanner
       │ USB
       ▼
@@ -48,7 +54,7 @@ USB Printer/Scanner
 │  │  Samba   │  │  NFS :2049   │  (optional)     │
 │  │  :445    │  └──────────────┘                 │
 └──┴──────────┴────────────────────────────────────┘
-\`\`\`
+```
 
 The portal is a **Vue 3 + TypeScript SPA** backed by an **Express 4** API server.
 In the native or Proxmox LXC install, the portal process is managed by `systemd` (`printershare-portal.service`).
@@ -59,9 +65,9 @@ In the native or Proxmox LXC install, the portal process is managed by `systemd`
 
 Tested on Debian 12 / Ubuntu 22.04 (bare metal or LXC).
 
-\`\`\`bash
+```bash
 curl -fsSL https://raw.githubusercontent.com/alal76/printershare/main/scripts/install.sh | sudo bash
-\`\`\`
+```
 
 The installer:
 1. Installs system packages (CUPS, sane-utils, scanservjs, pdfunite, nginx, Node.js 20)
@@ -84,24 +90,24 @@ Default login: **admin / <generated password>** — you will be forced to change
 If the host is an LXC container on Proxmox, pass USB through from the Proxmox node first:
 
 1. On the **Proxmox node**, identify the LXC ID and USB device:
-   \`\`\`bash
+   ```bash
    pct list && lsusb
-   \`\`\`
+   ```
 2. Stop the container, add USB passthrough flags:
-   \`\`\`bash
+   ```bash
    pct stop <CTID>
    pct set <CTID> -features nesting=1,keyctl=1
-   \`\`\`
+   ```
 3. Edit `/etc/pve/lxc/<CTID>.conf`:
-   \`\`\`ini
+   ```ini
    lxc.cgroup2.devices.allow: c 189:* rwm
    lxc.mount.entry: /dev/bus/usb dev/bus/usb none bind,optional,create=dir
-   \`\`\`
+   ```
 4. Start and verify:
-   \`\`\`bash
+   ```bash
    pct start <CTID>
    pct exec <CTID> -- lsusb
-   \`\`\`
+   ```
 
 ---
 
@@ -114,7 +120,8 @@ The wizard runs automatically on first visit and guides you through 7 steps:
 3. **Passwords** — Sets portal admin password and Samba share password
 4. **Network** — Configures HTTPS port and CUPS connection
 5. **Cloud** — Optional rclone remote for scan auto-upload
-6. **Remote Access** — Optional Tailscale auth key + Cloudflare tunnel token
+6. **Remote Access** — Optional Tailscale auth key + Cloudflare tunnel token (a browser-based
+   Tailscale login, no auth key needed, is also available afterward from Settings → Tailscale)
 7. **Confirm** — Starts all services
 
 ---
@@ -154,15 +161,30 @@ Install [Mopria Print Service](https://play.google.com/store/apps/details?id=org
 then any app's Print menu will discover the printer.
 
 ### Linux
-\`\`\`bash
+```bash
 sudo lpadmin -p MyPrinter -E -v ipp://<host-ip>:631/printers/USB-Printer -m everywhere
 lpoptions -d MyPrinter
-\`\`\`
+```
 
 NFS share:
-\`\`\`bash
+```bash
 sudo mount -t nfs <host-ip>:/exports/scans /mnt/scans
-\`\`\`
+```
+
+### Scanning from other devices
+
+The attached scanner is exposed over the network via eSCL/AirScan (`airsaned`), announced
+via mDNS — no app or driver install required on:
+
+- **macOS / iOS** — Image Capture / the Notes app's scanner import finds it automatically
+- **Linux** — any SANE client (`scanimage -L`, XSane, Simple Scan) sees it as a normal device
+- **Windows 10/11** — not natively via Explorer/WIA (that path uses WSD, which nothing in
+  this stack currently implements); install the free **Windows Scan** app from the
+  Microsoft Store instead, which speaks eSCL directly
+
+On all platforms, the portal's own web UI (`http://<host-ip>/`) works for scanning
+regardless of native OS integration — that's the primary interface, the OS-level
+integrations above are a convenience layer on top of it.
 
 ---
 
@@ -207,10 +229,18 @@ All routes under `/api/v1/` except `/auth/*` and `/health` require a valid sessi
 | `POST`   | `/auth/logout` | Invalidate session |
 | `GET`    | `/health` | Service health check (unauthenticated) |
 | `GET`    | `/system/info` | Host system info |
-| `GET`    | `/devices` | USB devices + CUPS printers |
-| `POST`   | `/devices/printer` | Add a network printer to CUPS |
+| `GET`    | `/devices` | USB devices + CUPS printers + SANE scanners |
+| `GET`    | `/devices/drivers?q=…` | Search the installed driver/PPD catalogue |
+| `POST`   | `/devices/printer` | Add a printer — `ipp(s)://`, `socket://`, `lpd://`, or `usb://`; optional `driver` override |
+| `POST`   | `/devices/printer/auto-add` | Register a detected USB printer by vid:pid |
 | `DELETE` | `/devices/printer/:name` | Remove a printer from CUPS |
+| `POST`   | `/devices/printer/:name/default` | Set as the system default printer |
+| `POST`   | `/devices/printer/:name/ppd` | Apply an uploaded vendor `.ppd` file |
 | `POST`   | `/devices/printer/:name/test` | Print a test page |
+| `POST`   | `/devices/scanner/default` | Set the portal's preferred default scanner |
+| `GET`    | `/devices/scanner/network` | List statically-configured network scanners |
+| `POST`   | `/devices/scanner/network` | Register a network scanner outside the mDNS broadcast domain |
+| `DELETE` | `/devices/scanner/network/:name` | Remove a static network scanner entry |
 | `GET`    | `/scans` | List scan files |
 | `GET`    | `/scans/context` | Scanner device capabilities proxied from scanservjs |
 | `GET`    | `/scans/:filename` | Download a scan file |
@@ -220,6 +250,8 @@ All routes under `/api/v1/` except `/auth/*` and `/health` require a valid sessi
 | `POST`   | `/printer/print` | Upload and print a file |
 | `GET`    | `/settings` | Read configuration (secrets redacted) |
 | `PATCH`  | `/settings` | Update configuration |
+| `POST`   | `/settings/tailscale/login` | Start interactive Tailscale login (no auth key) — returns a login URL |
+| `POST`   | `/settings/tailscale/logout` | Disconnect Tailscale |
 | `GET`    | `/wizard/state` | Wizard completion state |
 | `POST`   | `/wizard/state` | Update wizard step |
 | `POST`   | `/wizard/build` | Build and start all services |
@@ -241,7 +273,7 @@ The canonical per-device fix table lives in
 Keys are lowercase `vid:pid` or `vid:*` vendor wildcards.
 Lookup falls back: exact → vendor → make string → none.
 
-\`\`\`jsonc
+```jsonc
 {
   "04e8:344f": {
     "name":  "Samsung SCX-3400 Series",
@@ -262,20 +294,51 @@ Lookup falls back: exact → vendor → make string → none.
     "notes":   "Requires Samsung ULD driver. ipp-usb does not work with this model."
   }
 }
-\`\`\`
+```
 
 To add a new device: add an entry keyed by VID:PID from `lsusb`, commit, then reconcile
 on the host:
 
-\`\`\`bash
+```bash
 curl -X POST http://<host-ip>/api/v1/wizard/apply-quirks
-\`\`\`
+```
+
+This reconciliation also runs automatically — `printershare-hotplug.timer` polls the
+attached USB device set every 20s and re-applies the quirks catalogue (installing any
+newly-required apt packages) whenever it changes, so plugging in a different printer or
+scanner after install doesn't require re-running the installer or the wizard. It's a
+polling timer rather than a udev rule because `systemd-udevd` cannot run inside an
+unprivileged Proxmox LXC container (this project's primary deployment target) — `/sys`
+isn't writable there, so udev rules never fire. Check its activity with:
+
+```bash
+systemctl status printershare-hotplug.timer
+journalctl -t printershare-hotplug -f
+```
+
+### Driver detection beyond the quirks catalogue
+
+For devices the quirks catalogue doesn't know about:
+1. **Driver-less protocols** — AirPrint / IPP Everywhere (printers) and eSCL/AirScan
+   (scanners) work with zero driver install, and are preferred whenever a device supports
+   them.
+2. **Local driver search** — `GET /api/v1/devices/drivers?q=…` searches the ~14,000 PPDs
+   already installed via `foomatic-db` + `gutenprint` + `hplip`, for printers that need a
+   real driver (older network printers, `socket://`/`lpd://` raw queues).
+3. **PPD upload** — if a printer's driver isn't packaged for Debian, a user-downloaded
+   vendor `.ppd` (plain text, not a binary) can be applied directly via
+   `POST /api/v1/devices/printer/:name/ppd`.
+
+There is deliberately **no** path that downloads and executes an arbitrary vendor
+installer — that would mean running untrusted binaries as root, triggered by a USB event
+or a driver search. SANE backends are compiled native code (not a text format like PPD),
+so there is no equivalent "upload a scanner driver" feature for the same reason.
 
 ---
 
 ## Development
 
-\`\`\`bash
+```bash
 cd portal
 npm install
 
@@ -284,11 +347,11 @@ npm run lint         # ESLint (must be 0 errors, 0 warnings)
 npm run type-check   # TypeScript strict check
 npm test             # Unit tests — 56 tests across 8 suites
 npm run test:e2e     # Playwright E2E tests
-\`\`\`
+```
 
 ### Project layout
 
-\`\`\`
+```
 portal/
 ├── server/                  Express API (CommonJS)
 │   ├── app.js               Bare app (used by tests)
@@ -296,9 +359,11 @@ portal/
 │   ├── data/
 │   │   └── device-quirks.json
 │   ├── lib/
-│   │   ├── auth.js          Session tokens, rate limiting, password management
-│   │   ├── env.js           .env read/write helpers
-│   │   └── device-quirks.js Quirks catalogue lookup
+│   │   ├── auth.js            Session tokens, rate limiting, password management
+│   │   ├── env.js             .env read/write helpers
+│   │   ├── device-quirks.js   Quirks catalogue lookup
+│   │   ├── scanner-prefs.js   Portal-side "default scanner" preference (SANE has none)
+│   │   └── network-scanner.js Static network scanner entries (sane-airscan's airscan.conf)
 │   └── routes/              One file per API resource
 └── src/                     Vue 3 + TypeScript SPA
     ├── components/
@@ -306,7 +371,7 @@ portal/
     ├── router/
     ├── stores/
     └── views/
-\`\`\`
+```
 
 ---
 
@@ -314,33 +379,33 @@ portal/
 
 ### Deploy script
 
-\`\`\`bash
+```bash
 ./scripts/deploy.sh          # git pull + build portal + restart service
-\`\`\`
+```
 
 On the LXC host this runs:
-\`\`\`bash
+```bash
 cd /opt/printershare
 git pull --ff-only
 cd portal && npm run build
 rm -rf public && cp -r dist public
 systemctl restart printershare-portal
-\`\`\`
+```
 
 ### Backup
 
-\`\`\`bash
+```bash
 ./scripts/backup.sh                  # → backups/YYYY-MM-DD_HH-MM-SS.tar.gz
 ./scripts/backup.sh --dest /mnt/nas
-\`\`\`
+```
 
 ### Creating a release
 
-\`\`\`bash
+```bash
 ./scripts/release.sh patch   # bump patch version, tag, push
 ./scripts/release.sh minor
 ./scripts/release.sh major
-\`\`\`
+```
 
 ---
 

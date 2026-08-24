@@ -34,6 +34,9 @@ You can expect an acknowledgement within 72 hours and a patch within 14 days for
 | **Settings allow-list** | Only keys in `ALLOWED_SETTINGS` in `portal/server/routes/settings.js` can be written to `.env` |
 | **HTML output** | `v-html` is not used in Vue components; user-facing text goes through text interpolation |
 | **Secrets in repo** | No secrets committed; `.env` and `portal.env` are `.gitignore`d |
+| **PPD upload validation** | Printer driver uploads (`POST /devices/printer/:name/ppd`) are capped at 512KB, must have a `.ppd` extension, and are rejected unless they start with the `*PPD-Adobe:` magic header — plain-text CUPS config, never an executable |
+| **No arbitrary driver execution** | Driver installs only ever come from apt (Debian-packaged) or a user-supplied PPD text file; nothing fetches or runs a vendor installer binary. SANE scanner backends are native code with no equivalent upload path, deliberately, to avoid accepting arbitrary code to `dlopen()` as root |
+| **Unattended driver installs** | `printershare-hotplug.timer` polls USB changes every 20s and runs `apt-get install` as root for any matched quirks-catalogue package — scoped to the curated `device-quirks.json` catalogue, not arbitrary packages |
 
 ---
 

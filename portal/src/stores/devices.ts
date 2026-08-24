@@ -29,6 +29,7 @@ export interface CupsPrinter {
   location:     string
   info:         string
   jobCount:     number
+  default:      boolean
 }
 
 export type PrinterAction = 'enable' | 'disable' | 'accept' | 'reject' | 'cancel-jobs' | 'resume'
@@ -41,18 +42,61 @@ export interface PrinterOption {
 }
 
 export interface SaneScanner {
-  device: string
-  vendor: string
-  model:  string
-  type:   string
+  device:  string
+  vendor:  string
+  model:   string
+  type:    string
+  default: boolean
+}
+
+export interface NetworkScanner {
+  name:     string
+  url:      string
+  protocol: string
+  disabled: boolean
 }
 
 export const useDevicesStore = defineStore('devices', () => {
-  const usb      = ref<UsbDevice[]>([])
-  const printers = ref<CupsPrinter[]>([])
-  const scanners = ref<SaneScanner[]>([])
+  const usb            = ref<UsbDevice[]>([])
+  const printers       = ref<CupsPrinter[]>([])
+  const scanners       = ref<SaneScanner[]>([])
+  const networkScanners = ref<NetworkScanner[]>([])
   const loading  = ref(false)
   const error    = ref<string | null>(null)
+
+  async function fetchNetworkScanners() {
+    try {
+      const r = await fetch('/api/v1/devices/scanner/network')
+      if (!r.ok) return // native-only feature — silently skip if unavailable
+      const data = await r.json() as { scanners: NetworkScanner[] }
+      networkScanners.value = data.scanners ?? []
+    } catch { /* best-effort — not fatal if unreachable */ }
+  }
+
+  async function addNetworkScanner(name: string, url: string, protocol: 'eSCL' | 'WSD'): Promise<void> {
+    const r = await fetch('/api/v1/devices/scanner/network', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, url, protocol }),
+    })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Failed to add network scanner')
+    }
+    await fetchNetworkScanners()
+    await fetchDevices()
+  }
+
+  async function removeNetworkScanner(name: string): Promise<void> {
+    const r = await fetch(`/api/v1/devices/scanner/network/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Failed to remove network scanner')
+    }
+    networkScanners.value = networkScanners.value.filter(s => s.name !== name)
+  }
 
   async function fetchDevices() {
     loading.value = true
@@ -71,15 +115,31 @@ export const useDevicesStore = defineStore('devices', () => {
     }
   }
 
-  async function addPrinter(name: string, uri: string): Promise<void> {
+  async function addPrinter(name: string, uri: string, driver?: string): Promise<{ driver: string }> {
     const r = await fetch('/api/v1/devices/printer', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ name, uri }),
+      body:    JSON.stringify({ name, uri, driver: driver || undefined }),
     })
     if (!r.ok) {
       const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
       throw new Error(e.error ?? 'Failed to add printer')
+    }
+    const data = await r.json() as { driver: string }
+    await fetchDevices()
+    return data
+  }
+
+  async function uploadPpd(name: string, file: File): Promise<void> {
+    const form = new FormData()
+    form.append('ppd', file)
+    const r = await fetch(`/api/v1/devices/printer/${encodeURIComponent(name)}/ppd`, {
+      method: 'POST',
+      body:   form,
+    })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Failed to apply PPD')
     }
     await fetchDevices()
   }
@@ -121,6 +181,30 @@ export const useDevicesStore = defineStore('devices', () => {
     return data
   }
 
+  async function setDefaultPrinter(name: string): Promise<void> {
+    const r = await fetch(`/api/v1/devices/printer/${encodeURIComponent(name)}/default`, {
+      method: 'POST',
+    })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Failed to set default printer')
+    }
+    await fetchDevices()
+  }
+
+  async function setDefaultScanner(device: string): Promise<void> {
+    const r = await fetch('/api/v1/devices/scanner/default', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ device }),
+    })
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+      throw new Error(e.error ?? 'Failed to set default scanner')
+    }
+    await fetchDevices()
+  }
+
   return {
     usb, printers, scanners, loading, error,
     fetchDevices, addPrinter, autoAddPrinter, removePrinter,
@@ -128,8 +212,31 @@ export const useDevicesStore = defineStore('devices', () => {
     printerAction: printerActionFn,
     fetchPrinterAttributes: fetchPrinterAttributesFn,
     setPrinterOption: setPrinterOptionFn,
+    setDefaultPrinter, setDefaultScanner, uploadPpd,
+    networkScanners, fetchNetworkScanners, addNetworkScanner, removeNetworkScanner,
   }
 })
+
+export interface DriverOption {
+  id:          string
+  description: string
+}
+
+/**
+ * Search the installed driver/PPD catalogue (`lpinfo -m` — foomatic-db,
+ * gutenprint, hplip). Used to pick a real driver for printers that don't
+ * support driverless IPP Everywhere (older network printers, socket://
+ * and lpd:// raw queues).
+ */
+export async function searchDrivers(q: string): Promise<DriverOption[]> {
+  const r = await fetch(`/api/v1/devices/drivers?q=${encodeURIComponent(q)}`)
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({ error: `HTTP ${r.status}` }))
+    throw new Error((e as { error?: string }).error ?? 'Driver search failed')
+  }
+  const data = await r.json() as { drivers: DriverOption[] }
+  return data.drivers ?? []
+}
 
 /**
  * Send a test page to the named printer.

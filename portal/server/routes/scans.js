@@ -8,6 +8,7 @@ const { spawn }  = require('node:child_process');
 const mime   = require('mime-types');
 const { withScanLock } = require('../lib/device-lock');
 const { isNative } = require('../lib/deployment');
+const { getDefaultScanner } = require('../lib/scanner-prefs');
 
 const SCANS_PATH  = process.env.SCANS_PATH || '/scans';
 const SCANSERVJS_URL = process.env.SCANSERVJS_URL || (isNative() ? 'http://127.0.0.1:8080' : 'http://ps-scanservjs:8080');
@@ -25,7 +26,8 @@ router.get('/context', async (_req, res) => {
     const r = await fetch(`${SCANSERVJS_URL}/api/v1/context`);
     if (!r.ok) return res.status(502).json({ error: 'Scanner unavailable', device: null });
     const ctx = await r.json();
-    const device = ctx.devices?.[0] ?? null;
+    const preferred = getDefaultScanner();
+    const device = (preferred && ctx.devices?.find(d => d.id === preferred)) || ctx.devices?.[0] || null;
     res.json({
       device: device ? {
         id:       device.id,

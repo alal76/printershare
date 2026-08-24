@@ -12,7 +12,7 @@
  */
 
 const router = require('express').Router();
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
 const { readEnv, writeEnvPatch, REDACT_PLACEHOLDER } = require('../lib/env');
 const { setRuntimeAuth, setRuntimePassword } = require('../lib/auth');
 const { isNative } = require('../lib/deployment');
@@ -125,6 +125,96 @@ router.patch('/', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: String(err.message) });
   }
+});
+
+/**
+ * POST /api/v1/settings/tailscale/login
+ * Starts an interactive Tailscale login instead of requiring a pre-generated
+ * auth key: runs `tailscale up` with no `--authkey`, which makes the
+ * tailscaled daemon print a one-time login URL and then wait for the user
+ * to complete authentication in *any* browser (this is a headless server —
+ * there's no local browser to open it for them). We capture that URL from
+ * the process's output and hand it back to the portal UI as a link; the
+ * `tailscale up` process itself keeps running detached in the background
+ * and connects on its own once the user finishes the login in their
+ * browser (health.js's existing status poll picks up the new state).
+ */
+router.post('/tailscale/login', (req, res) => {
+  if (!isNative()) {
+    return res.status(400).json({ error: 'Only available in native deployment mode' });
+  }
+
+  const child = spawn('tailscale', ['up', '--accept-routes'], {
+    detached: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let buf = '';
+  let responded = false;
+  const URL_RE = /(https:\/\/login\.tailscale\.com\/\S+)/;
+
+  const onData = (chunk) => {
+    buf += chunk.toString();
+    const m = URL_RE.exec(buf);
+    if (m && !responded) {
+      responded = true;
+      clearTimeout(timer);
+      res.json({ url: m[1] });
+      // The child keeps running in the background to complete the login
+      // once the user visits the URL — don't kill it, just stop listening.
+      child.stdout.off('data', onData);
+      child.stderr.off('data', onData);
+      child.unref();
+    }
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+
+  child.on('error', (err) => {
+    if (!responded) {
+      responded = true;
+      clearTimeout(timer);
+      res.status(500).json({ error: `Failed to start tailscale: ${err.message}` });
+    }
+  });
+
+  child.on('close', (code) => {
+    if (!responded) {
+      responded = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        // Already logged in / reconnected without needing a fresh login.
+        res.json({ alreadyConnected: true });
+      } else {
+        res.status(500).json({ error: (buf || `tailscale up exited ${code}`).slice(0, 300) });
+      }
+    }
+  });
+
+  // If neither a URL nor an exit shows up quickly, don't hang the request
+  // forever — report back what we have so far and let the client poll
+  // /api/v1/health for connection status instead.
+  const timer = setTimeout(() => {
+    if (!responded) {
+      responded = true;
+      res.status(202).json({ pending: true, log: buf.slice(0, 300) });
+    }
+  }, 15_000);
+});
+
+/**
+ * POST /api/v1/settings/tailscale/logout
+ * Disconnects and clears the current Tailscale identity, so a different
+ * account can be used with a fresh browser login.
+ */
+router.post('/tailscale/logout', (_req, res) => {
+  if (!isNative()) {
+    return res.status(400).json({ error: 'Only available in native deployment mode' });
+  }
+  execFile('tailscale', ['logout'], { timeout: 10_000, encoding: 'utf8' }, (err, _stdout, stderr) => {
+    if (err) return res.status(500).json({ error: (stderr || err.message).slice(0, 300) });
+    res.json({ ok: true });
+  });
 });
 
 module.exports = router;

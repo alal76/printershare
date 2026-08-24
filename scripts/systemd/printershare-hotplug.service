@@ -1,0 +1,6 @@
+[Unit]
+Description=PrinterShare USB hotplug driver check (one-shot)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/printershare-hotplug.sh

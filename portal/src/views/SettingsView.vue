@@ -142,10 +142,89 @@
         @update:patch="patch = $event"
       />
 
-      <!-- ── Remote Access ───────────────────────────────────────────────── -->
+      <!-- ── Tailscale ───────────────────────────────────────────────────── -->
+      <Card>
+        <div class="flex items-center gap-3 mb-4">
+          <div class="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center flex-shrink-0">
+            <ShieldIcon class="w-4 h-4 text-indigo-600" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-gray-900">
+                Tailscale
+              </h2>
+              <StatusBadge
+                v-if="tailscaleConnected"
+                status="ok"
+                label="Connected"
+              />
+            </div>
+            <p class="text-xs text-gray-500 mt-0.5">
+              Access this portal securely from anywhere, without port-forwarding.
+            </p>
+          </div>
+        </div>
+
+        <div
+          v-if="tailscaleConnected"
+          class="space-y-3"
+        >
+          <p
+            v-if="tailscaleIp"
+            class="font-mono text-xs text-indigo-700 bg-indigo-50 rounded-lg px-3 py-2 inline-block"
+          >
+            {{ tailscaleIp }}
+          </p>
+          <div>
+            <Button
+              size="sm"
+              variant="secondary"
+              :loading="tailscaleLoggingOut"
+              @click="onTailscaleLogout"
+            >
+              Disconnect
+            </Button>
+          </div>
+        </div>
+
+        <div
+          v-else
+          class="space-y-3"
+        >
+          <p class="text-xs text-gray-500">
+            Log in with your Tailscale account in a browser — no auth key to generate or paste.
+          </p>
+          <div
+            v-if="tailscaleLoginUrl"
+            class="p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-xs text-indigo-800 space-y-2"
+          >
+            <p>Open this link to finish signing in (works from any device):</p>
+            <a
+              :href="tailscaleLoginUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="block truncate font-mono text-indigo-700 hover:underline"
+            >{{ tailscaleLoginUrl }}</a>
+            <p class="text-indigo-500">
+              Waiting for you to finish in the browser — this updates automatically.
+            </p>
+          </div>
+          <Button
+            v-else
+            size="sm"
+            :loading="tailscaleLoggingIn"
+            @click="onTailscaleLogin"
+          >
+            <ShieldIcon class="w-3.5 h-3.5" />
+            Connect via Browser
+          </Button>
+        </div>
+      </Card>
+
+      <!-- ── Remote Access (advanced) ───────────────────────────────────── -->
       <SettingsSection
-        title="Remote Access"
-        description="Tailscale VPN and Cloudflare Tunnel for access outside your LAN."
+        title="Remote Access (Advanced)"
+        description="Reusable Tailscale auth key (for unattended/scripted setup) and Cloudflare Tunnel."
         icon="globe"
         :fields="remoteFields"
         :patch="patch"
@@ -288,12 +367,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter }      from 'vue-router'
-import { RefreshCwIcon, Loader2Icon, WandIcon, LockIcon, PackageIcon, CheckCircle2Icon, DownloadIcon } from 'lucide-vue-next'
-import AppShell from '@/components/layout/AppShell.vue'
-import Card     from '@/components/ui/Card.vue'
-import Button   from '@/components/ui/Button.vue'
+import { RefreshCwIcon, Loader2Icon, WandIcon, LockIcon, PackageIcon, CheckCircle2Icon, DownloadIcon, ShieldIcon } from 'lucide-vue-next'
+import AppShell    from '@/components/layout/AppShell.vue'
+import Card        from '@/components/ui/Card.vue'
+import Button      from '@/components/ui/Button.vue'
+import StatusBadge from '@/components/ui/StatusBadge.vue'
 import SettingsSection from '@/components/settings/SettingsSection.vue'
 import { useToastStore }  from '@/stores/toast'
 import { useSystemStore } from '@/stores/system'
@@ -306,6 +386,69 @@ const loading    = ref(false)
 const savingGroup = ref<string | null>(null)
 const patch      = ref<Record<string, string>>({})
 const restarting = ref<string | null>(null)
+
+// ── Tailscale ────────────────────────────────────────────────────────────
+const tailscaleConnected = computed(() => system.health?.services?.tailscale?.status === 'ok')
+const tailscaleIp        = computed(() => system.health?.services?.tailscale?.ip ?? null)
+const tailscaleLoggingIn  = ref(false)
+const tailscaleLoggingOut = ref(false)
+const tailscaleLoginUrl   = ref<string | null>(null)
+let tailscalePollTimer: ReturnType<typeof setInterval> | undefined
+
+function stopTailscalePoll() {
+  if (tailscalePollTimer) clearInterval(tailscalePollTimer)
+  tailscalePollTimer = undefined
+}
+
+async function onTailscaleLogin() {
+  tailscaleLoggingIn.value = true
+  tailscaleLoginUrl.value  = null
+  try {
+    const r = await fetch('/api/v1/settings/tailscale/login', { method: 'POST' })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`)
+    if (data.alreadyConnected) {
+      toast.success('Tailscale connected')
+      await system.fetchHealth()
+    } else if (data.url) {
+      tailscaleLoginUrl.value = data.url
+      // Poll health every few seconds while waiting for the user to finish
+      // the login in their browser; stop as soon as it reports connected.
+      stopTailscalePoll()
+      tailscalePollTimer = setInterval(async () => {
+        await system.fetchHealth()
+        if (tailscaleConnected.value) {
+          stopTailscalePoll()
+          tailscaleLoginUrl.value = null
+          toast.success('Tailscale connected')
+        }
+      }, 4000)
+    } else {
+      toast.error('Tailscale login', 'Still starting — check back in a moment.')
+    }
+  } catch (err) {
+    toast.error('Could not start Tailscale login', err instanceof Error ? err.message : String(err))
+  } finally {
+    tailscaleLoggingIn.value = false
+  }
+}
+
+async function onTailscaleLogout() {
+  tailscaleLoggingOut.value = true
+  try {
+    const r = await fetch('/api/v1/settings/tailscale/logout', { method: 'POST' })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`)
+    toast.success('Tailscale disconnected')
+    await system.fetchHealth()
+  } catch (err) {
+    toast.error('Could not disconnect', err instanceof Error ? err.message : String(err))
+  } finally {
+    tailscaleLoggingOut.value = false
+  }
+}
+
+onUnmounted(stopTailscalePoll)
 
 // ── Admin access ───────────────────────────────────────────────────────────
 const authEnabled  = ref(false)
@@ -348,7 +491,7 @@ const cloudFields: Field[] = [
 ]
 
 const remoteFields: Field[] = [
-  { key: 'TAILSCALE_AUTH_KEY',      label: 'Tailscale Auth Key',      secret: true },
+  { key: 'TAILSCALE_AUTH_KEY',      label: 'Tailscale Auth Key',      secret: true, hint: 'Optional alternative to "Connect via Browser" above — useful for unattended re-provisioning.' },
   { key: 'CLOUDFLARE_TUNNEL_TOKEN', label: 'Cloudflare Tunnel Token', secret: true },
 ]
 

@@ -8,25 +8,43 @@
  * inside the CUPS container (the portal container itself has no CUPS client).
  *
  * GET    /api/v1/devices            – Combined USB + CUPS device list.
+ * GET    /api/v1/devices/drivers    – Search the installed driver/PPD catalogue.
  * POST   /api/v1/devices/printer    – Register a new CUPS printer.
  * POST   /api/v1/devices/printer/auto-add – Auto-detect URI from a USB device.
  * DELETE /api/v1/devices/printer/:name  – Remove a CUPS printer.
+ * POST   /api/v1/devices/printer/:name/default – Set as the system default printer.
+ * POST   /api/v1/devices/printer/:name/ppd  – Apply an uploaded vendor .ppd file.
+ * POST   /api/v1/devices/scanner/default    – Set the portal's preferred default scanner.
+ * GET    /api/v1/devices/scanner/network    – List statically-configured network scanners.
+ * POST   /api/v1/devices/scanner/network    – Register a network scanner outside the mDNS domain.
+ * DELETE /api/v1/devices/scanner/network/:name – Remove a static network scanner entry.
  * POST   /api/v1/devices/printer/:name/test  – Print the CUPS test page.
  * POST   /api/v1/devices/reset      – Remove all CUPS printers + clear wizard.
  */
 
 const router = require('express').Router();
 const fs     = require('node:fs');
+const os     = require('node:os');
 const path   = require('node:path');
+const multer = require('multer');
 const { spawnSync } = require('node:child_process');
 const { parseUsbDevices } = require('../services/usb-detect');
-const { cupsCmd, scanCmd } = require('../lib/deployment');
+const { cupsCmd, scanCmd, isNative } = require('../lib/deployment');
+const { getDefaultScanner, setDefaultScanner } = require('../lib/scanner-prefs');
+const { listNetworkScanners, addNetworkScanner, removeNetworkScanner } = require('../lib/network-scanner');
 
 /** Allowed characters in a CUPS printer name. */
 const SAFE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** Validate IPP/IPPS URI submitted by the user. */
-const SAFE_IPP_URI = /^ipps?:\/\/[A-Za-z0-9._\-:/]+$/;
+/**
+ * Validate a network printer/scanner URI. Covers driverless IPP/IPPS as
+ * well as the two protocols with no driverless mode — raw JetDirect/9100
+ * (`socket://`) and LPD (`lpd://`) — which need an explicit `driver`
+ * (see SAFE_DRIVER_ID) to be usable.
+ */
+const SAFE_NETWORK_URI = /^(?:ipps?|socket|lpd):\/\/[A-Za-z0-9._\-:/]+$/;
+/** True for protocols that have no driverless/"everywhere" mode. */
+const RAW_URI = /^(?:socket|lpd):\/\//;
 
 /** Validate `usb://Make/Model?...` URIs returned by CUPS lpinfo. */
 const SAFE_USB_URI = /^usb:\/\/[A-Za-z0-9%._\-/+]{1,128}\?[A-Za-z0-9%._\-=&]{0,256}$/;
@@ -34,16 +52,50 @@ const SAFE_USB_URI = /^usb:\/\/[A-Za-z0-9%._\-/+]{1,128}\?[A-Za-z0-9%._\-=&]{0,2
 /** USB vid:pid format. */
 const SAFE_VIDPID = /^[0-9a-f]{4}:[0-9a-f]{4}$/i;
 
+/** SANE device ids look like `smfp:usb;04e8;344f;SERIAL` — colons, semicolons, dots. */
+const SAFE_SCANNER_DEVICE = /^[A-Za-z0-9:;._-]{1,128}$/;
+
+/** Display name for a statically-configured network scanner (used as an airscan.conf key). */
+const SAFE_SCANNER_NAME = /^[A-Za-z0-9 _.-]{1,64}$/;
+/** eSCL root URL or WSD device URL, e.g. http://192.168.1.102:9095/eSCL */
+const SAFE_SCANNER_URL = /^https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/[A-Za-z0-9._~%\-/]*)?$/;
+
+/**
+ * A CUPS driver/PPD identifier as printed by `lpinfo -m`, e.g.
+ * `drv:///sample.drv/generic.ppd` or `foomatic-db-ppds:Foomatic/hpcups.ppd`.
+ * No spaces or shell metacharacters — args are passed via argv (never a
+ * shell), but this still rejects obviously-bogus input early.
+ */
+const SAFE_DRIVER_ID = /^[A-Za-z0-9:/_.-]{1,256}$/;
+
+/**
+ * Read the current CUPS default printer name via `lpstat -d`.
+ * @returns {string} empty string if none set or CUPS unreachable.
+ */
+function getDefaultPrinterName() {
+  try {
+    const out = runCups(['lpstat', '-d'], 3_000);
+    const m = /^system default destination:\s*(\S+)/.exec(out.trim());
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Run a command with an explicit arg array (no shell), capturing stdout.
  * @param {string[]} args  First element is the executable; the rest are arguments.
  * @param {number}   [timeout=10000]
+ * @param {number}   [maxBuffer=1048576]  spawnSync's stdout/stderr cap (Node
+ *   default is 1MB); `lpinfo -m` alone can exceed that with foomatic-db +
+ *   gutenprint + hplip installed, so callers with large output raise this.
  * @returns {string}
  */
-function run(args, timeout = 10_000) {
+function run(args, timeout = 10_000, maxBuffer = 1024 * 1024) {
   const result = spawnSync(args[0], args.slice(1), {
     encoding: 'utf8',
     timeout,
+    maxBuffer,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -57,10 +109,11 @@ function run(args, timeout = 10_000) {
  * the bare command in native mode — see `lib/deployment`).
  * @param {string[]} cupsArgs  e.g. ['lpstat', '-p']
  * @param {number}   [timeout]
+ * @param {number}   [maxBuffer]  see {@link run}
  */
-function runCups(cupsArgs, timeout = 10_000) {
+function runCups(cupsArgs, timeout = 10_000, maxBuffer = undefined) {
   const { cmd, args } = cupsCmd(cupsArgs);
-  return run([cmd, ...args], timeout);
+  return run([cmd, ...args], timeout, maxBuffer);
 }
 
 /**
@@ -213,6 +266,7 @@ router.get('/', (_req, res) => {
     const lpOut    = runCups(['lpstat', '-p'], 5_000);
     const richInfo = getRichPrinterInfo();
     const jobCounts = getJobCounts();
+    const defaultName = getDefaultPrinterName();
     const printerRe = /^printer (\S+)\s+(.+)$/gm;
     let m;
     while ((m = printerRe.exec(lpOut)) !== null) {
@@ -229,12 +283,14 @@ router.get('/', (_req, res) => {
         location:     rich.location,
         info:         rich.info,
         jobCount:     jobCounts[name] ?? 0,
+        default:      name === defaultName,
       });
     }
   } catch { /* CUPS not available */ }
 
   // --- SANE scanners via cached scanimage -L output ---
-  const scanners = parseSaneScanners(saneRaw);
+  const defaultScanner = getDefaultScanner();
+  const scanners = parseSaneScanners(saneRaw).map(s => ({ ...s, default: s.device === defaultScanner }));
 
   res.json({ usb, printers, scanners });
 });
@@ -419,29 +475,58 @@ function suggestPrinterName(make, model) {
 
 /**
  * POST /api/v1/devices/printer
- * Body: { name: string, uri: string }
- * Registers a new CUPS printer using lpadmin. The `everywhere` (driverless)
- * model is used for IPP/IPPS URIs; for `usb://` URIs CUPS auto-selects the
- * best matching driver from installed PPDs.
+ * Body: { name: string, uri: string, driver?: string }
+ *
+ * Registers a new CUPS printer using lpadmin.
+ *  - `driver` (optional), when given, must be a driver id from
+ *    GET /api/v1/devices/drivers (i.e. an `lpinfo -m` entry) or a path
+ *    applied via POST /printer/:name/ppd afterwards — used verbatim as
+ *    `-m <driver>`, overriding the defaults below.
+ *  - ipp(s):// with no driver → `-m everywhere` (driverless).
+ *  - socket:// / lpd:// (no driverless mode exists for either) with no
+ *    driver → a generic PostScript bootstrap driver; pick a real one via
+ *    `driver` or refine afterwards with POST /printer/:name/ppd.
+ *  - usb:// with no driver → CUPS auto-selects from installed PPDs.
  */
 router.post('/printer', (req, res) => {
-  const { name, uri } = req.body ?? {};
+  const { name, uri, driver } = req.body ?? {};
 
   if (!name || !SAFE_NAME.test(name)) {
     return res.status(400).json({ error: 'Invalid printer name (alphanumeric, up to 64 chars)' });
   }
-  const isIpp = SAFE_IPP_URI.test(uri || '');
+  const isNetwork = SAFE_NETWORK_URI.test(uri || '');
   const isUsb = SAFE_USB_URI.test(uri || '');
-  if (!uri || (!isIpp && !isUsb)) {
-    return res.status(400).json({ error: 'Invalid URI (must start with ipp://, ipps:// or usb://)' });
+  if (!uri || (!isNetwork && !isUsb)) {
+    return res.status(400).json({
+      error: 'Invalid URI (must start with ipp://, ipps://, socket://, lpd:// or usb://)',
+    });
   }
+  const safeDriver = (typeof driver === 'string' && SAFE_DRIVER_ID.test(driver)) ? driver : '';
 
   try {
     const adminArgs = ['lpadmin', '-p', name, '-E', '-v', uri];
-    if (isIpp) adminArgs.push('-m', 'everywhere');
+    let appliedDriver;
+    if (safeDriver) {
+      adminArgs.push('-m', safeDriver);
+      appliedDriver = safeDriver;
+    } else if (RAW_URI.test(uri)) {
+      // socket:// / lpd:// have no driverless mode. Bootstrap with the
+      // generic PostScript driver that ships in cups-filters' sample.drv;
+      // the caller should refine this via `driver` or POST .../ppd.
+      adminArgs.push('-m', 'drv:///sample.drv/generic.ppd');
+      appliedDriver = 'drv:///sample.drv/generic.ppd';
+    } else if (isNetwork) {
+      adminArgs.push('-m', 'everywhere');
+      appliedDriver = 'everywhere';
+    } else {
+      appliedDriver = 'auto (CUPS-selected)';
+    }
     runCups(adminArgs, 30_000);
-    runCups(['lpadmin', '-d', name], 5_000); // set as default
-    res.json({ ok: true, name, uri });
+    // Only claim the default slot if nothing is set yet — an explicit user
+    // choice (via /printer/:name/default) must never be silently overridden
+    // by adding a second, third, etc. printer.
+    if (!getDefaultPrinterName()) runCups(['lpadmin', '-d', name], 5_000);
+    res.json({ ok: true, name, uri, driver: appliedDriver });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });
   }
@@ -473,8 +558,54 @@ router.post('/printer/auto-add', (req, res) => {
     runCups(['lpadmin', '-p', printerName, '-E', '-v', found.uri,
              '-o', 'printer-is-shared=true'], 30_000);
     runCups(['cupsctl', '--share-printers'], 5_000);
-    runCups(['lpadmin', '-d', printerName], 5_000);
+    if (!getDefaultPrinterName()) runCups(['lpadmin', '-d', printerName], 5_000);
     res.json({ ok: true, name: printerName, uri: found.uri, make: found.make, model: found.model });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+// Cache of `lpinfo -m` (the installed driver/PPD catalogue — foomatic-db,
+// gutenprint and hplip alone list several thousand entries). The call takes
+// 1-3s, so results are cached briefly rather than re-run on every keystroke
+// of a search box.
+let _driverCatalog = null; // { ts: number, entries: {id:string, description:string}[] }
+const DRIVER_CATALOG_TTL_MS = 10 * 60 * 1000;
+
+/** @returns {{id:string, description:string}[]} */
+function getDriverCatalog() {
+  const now = Date.now();
+  if (_driverCatalog && (now - _driverCatalog.ts) < DRIVER_CATALOG_TTL_MS) {
+    return _driverCatalog.entries;
+  }
+  const out = runCups(['lpinfo', '-m'], 25_000, 16 * 1024 * 1024);
+  const entries = [];
+  for (const line of out.split('\n')) {
+    const m = /^(\S+)\s+(.+)$/.exec(line.trim());
+    if (m) entries.push({ id: m[1], description: m[2] });
+  }
+  _driverCatalog = { ts: now, entries };
+  return entries;
+}
+
+/**
+ * GET /api/v1/devices/drivers?q=<search>
+ * Search the locally-installed driver/PPD catalogue (foomatic-db +
+ * gutenprint + hplip, already pre-installed on every deploy, plus
+ * whatever per-device packages the quirks catalogue has added). Used by
+ * the "Add Network Printer" and "Change Driver" UI to let a user pick a
+ * real driver instead of only the driverless "everywhere" model — needed
+ * for any printer that doesn't support IPP Everywhere/AirPrint (older
+ * network printers, socket:// / lpd:// raw queues).
+ */
+router.get('/drivers', (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  try {
+    const all = getDriverCatalog();
+    const filtered = q
+      ? all.filter(e => e.description.toLowerCase().includes(q) || e.id.toLowerCase().includes(q))
+      : all;
+    res.json({ drivers: filtered.slice(0, 50), total: filtered.length });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });
   }
@@ -492,6 +623,113 @@ router.delete('/printer/:name', (req, res) => {
   try {
     runCups(['lpadmin', '-x', name], 10_000);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+/**
+ * POST /api/v1/devices/printer/:name/default
+ * Sets the named CUPS printer as the system default (`lpadmin -d`).
+ */
+router.post('/printer/:name/default', (req, res) => {
+  const { name } = req.params;
+  if (!SAFE_NAME.test(name)) {
+    return res.status(400).json({ error: 'Invalid printer name' });
+  }
+  try {
+    runCups(['lpadmin', '-d', name], 5_000);
+    res.json({ ok: true, default: name });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+/**
+ * POST /api/v1/devices/scanner/default
+ * Body: { device: string }
+ * Persists which SANE device id `/api/v1/scans/context` should prefer.
+ * SANE has no native "default device" concept, so this is portal-side state.
+ */
+router.post('/scanner/default', (req, res) => {
+  const { device } = req.body ?? {};
+  if (!device || !SAFE_SCANNER_DEVICE.test(device)) {
+    return res.status(400).json({ error: 'Invalid scanner device id' });
+  }
+  try {
+    setDefaultScanner(device);
+    res.json({ ok: true, default: device });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+/**
+ * GET /api/v1/devices/scanner/network
+ * Lists statically-configured network scanners (sane-airscan's
+ * airscan.conf [devices] section) — devices outside the mDNS broadcast
+ * domain that auto-discovery can't find on its own.
+ */
+router.get('/scanner/network', (_req, res) => {
+  if (!isNative()) {
+    return res.status(400).json({ error: 'Only available in native deployment mode' });
+  }
+  try {
+    res.json({ scanners: listNetworkScanners() });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+/**
+ * POST /api/v1/devices/scanner/network
+ * Body: { name: string, url: string, protocol: 'eSCL' | 'WSD' }
+ * Registers (or updates) a static network scanner entry, for a scanner
+ * that mDNS auto-discovery can't reach (different subnet/VLAN, or
+ * unreliable multicast). sane-airscan re-reads its config on every
+ * `scanimage` invocation, so no service restart is needed.
+ *
+ * Note: sane-airscan lists a statically-configured device unconditionally
+ * — it doesn't probe reachability at listing time (that would make every
+ * `scanimage -L` call as slow as its slowest configured device), so there
+ * is no reliable "is it actually reachable" signal to return here. An
+ * unreachable URL will still show up in the device list and only fail
+ * when a scan is actually attempted.
+ */
+router.post('/scanner/network', (req, res) => {
+  if (!isNative()) {
+    return res.status(400).json({ error: 'Only available in native deployment mode' });
+  }
+  const { name, url, protocol } = req.body ?? {};
+  if (!name || !SAFE_SCANNER_NAME.test(name)) {
+    return res.status(400).json({ error: 'Invalid name (letters, numbers, spaces, up to 64 chars)' });
+  }
+  if (!url || !SAFE_SCANNER_URL.test(url)) {
+    return res.status(400).json({ error: 'Invalid url (must be http:// or https://)' });
+  }
+  const proto = protocol === 'WSD' ? 'WSD' : 'eSCL';
+  try {
+    addNetworkScanner(name, url, proto);
+    res.json({ ok: true, name, url, protocol: proto });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 200) });
+  }
+});
+
+/**
+ * DELETE /api/v1/devices/scanner/network/:name
+ */
+router.delete('/scanner/network/:name', (req, res) => {
+  if (!isNative()) {
+    return res.status(400).json({ error: 'Only available in native deployment mode' });
+  }
+  const { name } = req.params;
+  if (!SAFE_SCANNER_NAME.test(name)) {
+    return res.status(400).json({ error: 'Invalid name' });
+  }
+  try {
+    const removed = removeNetworkScanner(name);
+    res.json({ ok: removed });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 200) });
   }
@@ -590,6 +828,79 @@ router.post('/printer/:name/option', (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message).slice(0, 300) });
+  }
+});
+
+const ppdUpload = multer({
+  storage: multer.diskStorage({
+    destination: os.tmpdir(),
+    filename: (_req, _file, cb) => cb(null, `ps-ppd-${Date.now()}-${Math.random().toString(36).slice(2)}.ppd`),
+  }),
+  limits: { fileSize: 512 * 1024 }, // PPDs are plain-text and small; 512KB is generous
+  fileFilter: (_req, file, cb) => cb(null, /\.ppd$/i.test(file.originalname)),
+});
+
+/**
+ * Make a locally-uploaded file available to the CUPS `lpadmin -P` command.
+ * Native mode: CUPS runs on the same host, the path already works.
+ * Docker mode: `lpadmin` runs inside the ps-cups container via `docker exec`,
+ * so the file has to be copied across the container boundary first.
+ * @param {string} localPath
+ * @returns {string} path usable in the `runCups(...)` argv
+ */
+function stageForCups(localPath) {
+  if (isNative()) return localPath;
+  const dest = `/tmp/${path.basename(localPath)}`;
+  const r = spawnSync('docker', ['cp', localPath, `ps-cups:${dest}`], { timeout: 10_000 });
+  if (r.status !== 0) throw new Error('Failed to copy PPD into the cups container');
+  return dest;
+}
+
+/** Remove the staged copy inside the cups container, best-effort. */
+function unstageFromCups(localPath) {
+  if (isNative()) return;
+  spawnSync('docker', ['exec', 'ps-cups', 'rm', '-f', `/tmp/${path.basename(localPath)}`], { timeout: 5_000 });
+}
+
+/**
+ * POST /api/v1/devices/printer/:name/ppd
+ * Multipart upload (`ppd` field) of a vendor-supplied .ppd file, applied
+ * to an existing printer via `lpadmin -P`. This is the safety-conscious
+ * counterpart to apt-installed drivers: PPDs are plain-text configuration
+ * files (not executables), so a user who has downloaded one from a
+ * vendor's site can apply it without needing shell/CUPS-admin access —
+ * covering printers with no Debian-packaged driver and no driverless mode,
+ * without the portal ever fetching or running untrusted vendor binaries
+ * itself.
+ */
+router.post('/printer/:name/ppd', ppdUpload.single('ppd'), (req, res) => {
+  const { name } = req.params;
+  const cleanup = () => { if (req.file) fs.unlink(req.file.path, () => {}); };
+
+  if (!SAFE_NAME.test(name)) {
+    cleanup();
+    return res.status(400).json({ error: 'Invalid printer name' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: 'No PPD file uploaded (field "ppd", .ppd extension, max 512KB)' });
+  }
+
+  try {
+    const head = fs.readFileSync(req.file.path, 'utf8').slice(0, 32);
+    if (!head.startsWith('*PPD-Adobe:')) {
+      return res.status(400).json({ error: 'Not a valid PPD file (missing *PPD-Adobe: header)' });
+    }
+    const cupsPath = stageForCups(req.file.path);
+    try {
+      runCups(['lpadmin', '-p', name, '-P', cupsPath], 20_000);
+    } finally {
+      unstageFromCups(req.file.path);
+    }
+    res.json({ ok: true, name, message: 'Driver updated from uploaded PPD' });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message).slice(0, 300) });
+  } finally {
+    cleanup();
   }
 });
 

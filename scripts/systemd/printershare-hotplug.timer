@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic PrinterShare USB hotplug driver check
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=20s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

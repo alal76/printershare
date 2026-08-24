@@ -321,6 +321,17 @@ router.post('/adopt-network-device', (req, res) => {
   const { cmd: acc, args: accArgs } = execIn('ps-cups', ['cupsaccept', name]);
   spawnSync(acc, accArgs, { timeout: 5_000 });
 
+  // Only claim the default slot if nothing is set yet — mirrors
+  // routes/devices.js so every add path behaves consistently and an
+  // explicit user choice is never silently overridden.
+  const { cmd: dQuery, args: dQueryArgs } = execIn('ps-cups', ['lpstat', '-d']);
+  const dResult = spawnSync(dQuery, dQueryArgs, { timeout: 3_000, encoding: 'utf8' });
+  const hasDefault = /^system default destination:/.test((dResult.stdout || '').trim());
+  if (!hasDefault) {
+    const { cmd: dflt, args: dfltArgs } = execIn('ps-cups', ['lpadmin', '-d', name]);
+    spawnSync(dflt, dfltArgs, { timeout: 5_000 });
+  }
+
   res.json({ ok: true, name, uri, message: `${name} added via IPP Everywhere (driverless)` });
 });
 
@@ -383,7 +394,9 @@ function checkPrintDriver(make, vidpid) {
   }
   try {
     const { cmd, args } = cupsCmd(['lpinfo', '-m']);
-    const result  = spawnSync(cmd, args, { timeout: 20000, encoding: 'utf8' });
+    // foomatic-db + gutenprint + hplip alone list thousands of PPDs — this
+    // easily exceeds spawnSync's 1MB default maxBuffer (ENOBUFS).
+    const result  = spawnSync(cmd, args, { timeout: 20000, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
     const output  = ((result.stdout || '') + (result.stderr || '')).split('\n');
     const lines   = make
       ? output.filter(l => l.toLowerCase().includes(make.toLowerCase())).slice(0, 5)
