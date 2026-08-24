@@ -393,13 +393,36 @@ function parseSaneScanners(raw) {
   return out;
 }
 
+// `lpinfo -v` does live backend/device discovery (USB + network) on every
+// call — measured at ~2s on this host — same blocking-the-whole-server
+// problem as scanimage -L (see collectSaneRaw's comment), just smaller.
+// Cached for the same reason: GET /devices calls this on every poll, and
+// findCupsUriForVidPid() calls it again for the same request via a
+// different path.
+const LPINFO_V_CACHE_TTL_MS = 15_000;
+let _lpinfoVCache = null; // { ts: number, raw: string }
+
+/**
+ * Run `lpinfo -v` (cached) and return its raw stdout.
+ * @returns {string}
+ */
+function collectLpinfoV() {
+  const now = Date.now();
+  if (_lpinfoVCache && (now - _lpinfoVCache.ts) < LPINFO_V_CACHE_TTL_MS) {
+    return _lpinfoVCache.raw;
+  }
+  const raw = runCups(['lpinfo', '-v'], 8_000);
+  _lpinfoVCache = { ts: now, raw };
+  return raw;
+}
+
 /**
  * Collect manufacturer names from CUPS-detected USB printers (`lpinfo -v`).
  * @returns {string[]} lowercased makes
  */
 function collectCupsPrinterMakes() {
   try {
-    const out = runCups(['lpinfo', '-v'], 8_000);
+    const out = collectLpinfoV();
     const makes = new Set();
     const re = /usb:\/\/([^/?\s]+)\//g;
     let m;
@@ -444,7 +467,7 @@ function parseSaneUsbDevices(raw) {
 function findCupsUriForVidPid(vidpid) {
   // 1) Authoritative: CUPS lpinfo
   try {
-    const out = runCups(['lpinfo', '-v'], 10_000);
+    const out = collectLpinfoV();
     const usbLineRe = /^\s*\S+\s+(usb:\/\/([^/?]+)\/([^?\s]+)(?:\?\S*)?)/gm;
     let m;
     while ((m = usbLineRe.exec(out)) !== null) {
