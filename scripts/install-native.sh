@@ -168,6 +168,19 @@ systemctl restart systemd-journald
 # ── CUPS ─────────────────────────────────────────────────────────────────
 info "Configuring CUPS..."
 cp "$(dirname "$0")/../cups/cupsd.conf" /etc/cups/cupsd.conf
+
+# cups.service ships with no ordering dependency on avahi-daemon.service,
+# so at boot both can start in parallel with no guarantee which comes up
+# first. CUPS registers its AirPrint/IPP DNS-SD records with avahi once at
+# startup and does not retry — losing that race leaves the printer
+# undiscoverable (iOS/macOS AirPrint, Windows/Android IPP-Everywhere) until
+# something manually restarts cups.
+mkdir -p /etc/systemd/system/cups.service.d
+install -o root -g root -m 644 \
+    "$(dirname "$0")/systemd/cups.service.d/avahi-order.conf" \
+    /etc/systemd/system/cups.service.d/avahi-order.conf
+systemctl daemon-reload
+
 systemctl enable --now cups && systemctl restart cups
 
 # ── SANE daemon ──────────────────────────────────────────────────────────

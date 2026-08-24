@@ -122,17 +122,33 @@ fi
 # ── Scans dir ───────────────────────────────────────────────────────────────
 mkdir -p "$SCANS_DIR" && chmod 0777 "$SCANS_DIR"
 
+# ── Avahi (mDNS/Bonjour for printer + share discovery) ──────────────────────
+# Started before CUPS deliberately: cupsd registers its AirPrint/IPP DNS-SD
+# records with avahi once, at startup, and does not retry. Starting them in
+# the other order (as this script used to) meant every fresh install lost
+# that race deterministically — the printer would come up but never be
+# discoverable via AirPrint/IPP-Everywhere until something later restarted
+# cups by hand.
+systemctl enable --now avahi-daemon
+
 # ── CUPS configuration ──────────────────────────────────────────────────────
 info "Configuring CUPS"
 cp -f "$REPO_DIR/cups/cupsd.conf" /etc/cups/cupsd.conf
 # CUPS web UI requires the lp / lpadmin groups to exist.
 groupadd -f lpadmin
 usermod -aG lpadmin root
+
+# Belt-and-braces for every subsequent boot, not just this install: an
+# explicit ordering dependency so a future reboot can't lose the same race
+# regardless of which order systemd happens to start things in.
+mkdir -p /etc/systemd/system/cups.service.d
+install -o root -g root -m 644 \
+    "$REPO_DIR/scripts/systemd/cups.service.d/avahi-order.conf" \
+    /etc/systemd/system/cups.service.d/avahi-order.conf
+systemctl daemon-reload
+
 systemctl enable --now cups
 systemctl restart cups
-
-# ── Avahi (mDNS/Bonjour for printer + share discovery) ──────────────────────
-systemctl enable --now avahi-daemon
 
 # ── Per-device vendor apt repos (driven by device-quirks.json) ─────────────
 # Some devices require vendor-specific apt repositories that are not in the
