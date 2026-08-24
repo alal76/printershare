@@ -18,8 +18,12 @@ git pull --ff-only
 echo "==> Building portal assets..."
 (cd portal && npm ci --silent && npm run build && rm -rf public && cp -r dist public)
 
-# Check for systemd unit
-if ! systemctl list-unit-files printershare-portal.service | grep -q printershare-portal; then
+# Check for systemd unit. `systemctl cat` exits non-zero if the unit
+# doesn't exist and needs no pipe — piping to `grep -q` here is a classic
+# pipefail trap: -q can close its stdin as soon as it matches, SIGPIPEing
+# the writer, which pipefail then reports as a failure even though the
+# check actually succeeded (intermittent, since it depends on scheduling).
+if ! systemctl cat printershare-portal.service &>/dev/null; then
   echo "ERROR: printershare-portal.service not found. This deploy script only supports native/LXC deployments." >&2
   exit 1
 fi
