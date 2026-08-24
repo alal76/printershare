@@ -27,7 +27,7 @@ const fs     = require('node:fs');
 const os     = require('node:os');
 const path   = require('node:path');
 const multer = require('multer');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const { parseUsbDevices } = require('../services/usb-detect');
 const { cupsCmd, scanCmd, isNative } = require('../lib/deployment');
 const { getDefaultScanner, setDefaultScanner } = require('../lib/scanner-prefs');
@@ -115,6 +115,90 @@ function run(args, timeout = 10_000, maxBuffer = 1024 * 1024) {
 function runCups(cupsArgs, timeout = 10_000, maxBuffer = undefined) {
   const { cmd, args } = cupsCmd(cupsArgs);
   return run([cmd, ...args], timeout, maxBuffer);
+}
+
+/**
+ * Async (non-blocking) equivalent of {@link run} — same throw-on-nonzero-
+ * exit / throw-on-error semantics, but via `spawn` instead of `spawnSync`
+ * so a slow command doesn't block the whole event loop (and therefore
+ * every other in-flight request) for its full duration. Used only for the
+ * specific calls that were actually measured to be slow enough to matter
+ * (`lpinfo -v`, ~2s) — the many fast (<100ms) `spawnSync` calls elsewhere
+ * in this file aren't worth the added complexity of converting.
+ * @param {string[]} args
+ * @param {number}   [timeout=10000]
+ * @param {number}   [maxBuffer=1048576]
+ * @returns {Promise<string>}
+ */
+function runAsync(args, timeout = 10_000, maxBuffer = 1024 * 1024) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(args[0], args.slice(1), { timeout });
+    let stdout = '';
+    let stderr = '';
+    let overflowed = false;
+
+    const track = (isErr) => (chunk) => {
+      if (overflowed) return;
+      if (isErr) stderr += chunk.toString('utf8'); else stdout += chunk.toString('utf8');
+      if (stdout.length + stderr.length > maxBuffer) {
+        overflowed = true;
+        child.kill();
+      }
+    };
+    child.stdout.on('data', track(false));
+    child.stderr.on('data', track(true));
+    child.on('error', reject);
+    child.on('close', (code, signal) => {
+      if (overflowed) { reject(new Error(`Output exceeded ${maxBuffer} bytes`)); return; }
+      if (code !== 0) {
+        const detail = stderr || (signal ? `terminated by signal ${signal}` : `Command failed with exit ${code}`);
+        reject(new Error(detail.slice(0, 400)));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
+/**
+ * Async equivalent of {@link runCups} — see {@link runAsync}.
+ * @param {string[]} cupsArgs
+ * @param {number}   [timeout]
+ * @param {number}   [maxBuffer]
+ * @returns {Promise<string>}
+ */
+function runCupsAsync(cupsArgs, timeout = 10_000, maxBuffer = undefined) {
+  const { cmd, args } = cupsCmd(cupsArgs);
+  return runAsync([cmd, ...args], timeout, maxBuffer);
+}
+
+/**
+ * Run a command asynchronously and resolve with its combined stdout+stderr
+ * regardless of exit code — mirrors the tolerant "just give me whatever
+ * came back" semantics `collectSaneRaw` already relied on with
+ * `spawnSync` (scanimage routinely exits non-zero while still printing a
+ * useful device list). Only a hard spawn failure (e.g. ENOENT) resolves
+ * to an empty string, matching the try/catch → '' fallback it replaces.
+ * @param {string} cmd
+ * @param {string[]} args
+ * @param {number} timeout
+ * @returns {Promise<string>}
+ */
+function spawnRawAsync(cmd, args, timeout) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, { timeout });
+    } catch {
+      resolve('');
+      return;
+    }
+    let out = '';
+    child.stdout.on('data', d => { out += d.toString('utf8'); });
+    child.stderr.on('data', d => { out += d.toString('utf8'); });
+    child.on('error', () => resolve(out));
+    child.on('close', () => resolve(out));
+  });
 }
 
 /**
@@ -283,19 +367,24 @@ function getPrinterUri(name) {
  * GET /api/v1/devices
  * Returns USB devices (from lsusb) and CUPS printers (from lpstat).
  */
-router.get('/', (_req, res) => {
+router.get('/', async (_req, res) => {
   // Run `scanimage -L` exactly once and reuse the output for both the
   // /scanners list and the lsusb capability annotation. Probing SANE on
   // the SCX-3400 takes ~6-8s per call; calling it twice doubled the
-  // /api/v1/devices latency for no reason.
-  const saneRaw = collectSaneRaw();
+  // /api/v1/devices latency for no reason. Run alongside lpinfo -v (~2s)
+  // rather than after it — both are cached and independent, so there's no
+  // reason to pay their cache-miss cost sequentially.
+  const [saneRaw, cupsPrinterMakes] = await Promise.all([
+    collectSaneRaw(),
+    collectCupsPrinterMakes(),
+  ]);
 
   // --- USB devices ---
   let usbRaw = '';
   try { usbRaw = run(['lsusb'], 5_000); } catch { /* lsusb not available */ }
   const usb = parseUsbDevices(usbRaw, {
-    cupsPrinterMakes: collectCupsPrinterMakes(),
-    saneUsbDevices:   parseSaneUsbDevices(saneRaw),
+    cupsPrinterMakes,
+    saneUsbDevices: parseSaneUsbDevices(saneRaw),
   });
 
   // --- CUPS printers via lpstat -p ---
@@ -360,26 +449,27 @@ let _saneRawCache = null; // { ts: number, raw: string }
  * stdout+stderr. Helpers that need different views of the data (scanner
  * descriptors / USB bus:device pairs) parse this raw output instead of
  * re-invoking the CLI.
- * @returns {string}
+ *
+ * Async via `spawn`, not `spawnSync`: this command was measured taking
+ * 8-11s, and under spawnSync that blocks the *entire* Node process for
+ * that whole duration — every other in-flight request too, not just this
+ * one (confirmed live: a concurrent /health request stalled for the same
+ * ~8s). The cache above already keeps this off the hot path for most
+ * calls; this is what fixes the remaining cache-miss case.
+ * @returns {Promise<string>}
  */
-function collectSaneRaw() {
+async function collectSaneRaw() {
   const now = Date.now();
   if (_saneRawCache && (now - _saneRawCache.ts) < SANE_RAW_CACHE_TTL_MS) {
     return _saneRawCache.raw;
   }
-  try {
-    const { cmd, args } = scanCmd(['scanimage', '-L']);
-    // Generous timeout — the command itself has been observed taking
-    // ~10.7s; the previous 10_000ms bound was shorter than that, meaning
-    // spawnSync's SIGTERM could truncate mid-flush rather than the
-    // command ever completing cleanly.
-    const r = spawnSync(cmd, args, { timeout: 20_000, encoding: 'utf8' });
-    const raw = (r.stdout || '') + (r.stderr || '');
-    _saneRawCache = { ts: now, raw };
-    return raw;
-  } catch {
-    return '';
-  }
+  const { cmd, args } = scanCmd(['scanimage', '-L']);
+  // Generous timeout — the command itself has been observed taking
+  // ~10.7s; a shorter bound risks the kill signal truncating mid-flush
+  // rather than the command ever completing cleanly.
+  const raw = await spawnRawAsync(cmd, args, 20_000);
+  _saneRawCache = { ts: now, raw };
+  return raw;
 }
 
 /** @param {string} raw */
@@ -403,26 +493,29 @@ const LPINFO_V_CACHE_TTL_MS = 15_000;
 let _lpinfoVCache = null; // { ts: number, raw: string }
 
 /**
- * Run `lpinfo -v` (cached) and return its raw stdout.
- * @returns {string}
+ * Run `lpinfo -v` (cached) and return its raw stdout. Async via
+ * {@link runCupsAsync} for the same reason as {@link collectSaneRaw} — a
+ * cache miss here still costs ~2s, and spawnSync would block every other
+ * in-flight request for that long too.
+ * @returns {Promise<string>}
  */
-function collectLpinfoV() {
+async function collectLpinfoV() {
   const now = Date.now();
   if (_lpinfoVCache && (now - _lpinfoVCache.ts) < LPINFO_V_CACHE_TTL_MS) {
     return _lpinfoVCache.raw;
   }
-  const raw = runCups(['lpinfo', '-v'], 8_000);
+  const raw = await runCupsAsync(['lpinfo', '-v'], 8_000);
   _lpinfoVCache = { ts: now, raw };
   return raw;
 }
 
 /**
  * Collect manufacturer names from CUPS-detected USB printers (`lpinfo -v`).
- * @returns {string[]} lowercased makes
+ * @returns {Promise<string[]>} lowercased makes
  */
-function collectCupsPrinterMakes() {
+async function collectCupsPrinterMakes() {
   try {
-    const out = collectLpinfoV();
+    const out = await collectLpinfoV();
     const makes = new Set();
     const re = /usb:\/\/([^/?\s]+)\//g;
     let m;
@@ -462,12 +555,12 @@ function parseSaneUsbDevices(raw) {
  *     resolves at print time even when device-ID parsing fails.
  *
  * @param {string} vidpid
- * @returns {{ uri: string, make: string, model: string } | null}
+ * @returns {Promise<{ uri: string, make: string, model: string } | null>}
  */
-function findCupsUriForVidPid(vidpid) {
+async function findCupsUriForVidPid(vidpid) {
   // 1) Authoritative: CUPS lpinfo
   try {
-    const out = collectLpinfoV();
+    const out = await collectLpinfoV();
     const usbLineRe = /^\s*\S+\s+(usb:\/\/([^/?]+)\/([^?\s]+)(?:\?\S*)?)/gm;
     let m;
     while ((m = usbLineRe.exec(out)) !== null) {
@@ -625,12 +718,12 @@ router.post('/printer', (req, res) => {
  * Body: { vidpid: string, name?: string }
  * Looks up the CUPS device URI for a USB vid:pid and registers it as a printer.
  */
-router.post('/printer/auto-add', (req, res) => {
+router.post('/printer/auto-add', async (req, res) => {
   const { vidpid, name } = req.body ?? {};
   if (!vidpid || !SAFE_VIDPID.test(vidpid)) {
     return res.status(400).json({ error: 'Invalid vidpid (expect xxxx:xxxx hex)' });
   }
-  const found = findCupsUriForVidPid(vidpid);
+  const found = await findCupsUriForVidPid(vidpid);
   if (!found) {
     return res.status(404).json({
       error: 'No CUPS device URI matched this USB device',
