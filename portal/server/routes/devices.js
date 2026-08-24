@@ -32,6 +32,7 @@ const { parseUsbDevices } = require('../services/usb-detect');
 const { cupsCmd, scanCmd, isNative } = require('../lib/deployment');
 const { getDefaultScanner, setDefaultScanner } = require('../lib/scanner-prefs');
 const { listNetworkScanners, addNetworkScanner, removeNetworkScanner } = require('../lib/network-scanner');
+const { ensureAwakeForPrinterUri } = require('../lib/device-wake');
 
 /** Allowed characters in a CUPS printer name. */
 const SAFE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
@@ -908,12 +909,13 @@ router.post('/printer/:name/ppd', ppdUpload.single('ppd'), (req, res) => {
  * POST /api/v1/devices/printer/:name/test
  * Prints the CUPS test page to the named printer.
  */
-router.post('/printer/:name/test', (req, res) => {
+router.post('/printer/:name/test', async (req, res) => {
   const { name } = req.params;
   if (!SAFE_NAME.test(name)) {
     return res.status(400).json({ error: 'Invalid printer name' });
   }
   try {
+    await ensureAwakeForPrinterUri(getPrinterUri(name));
     const out = runCups(['lp', '-d', name, '/usr/share/cups/data/testprint'], 15_000);
     res.json({ ok: true, message: out || 'Test page sent' });
   } catch (err) {

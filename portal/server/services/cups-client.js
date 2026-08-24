@@ -2,6 +2,7 @@
 'use strict';
 
 const { spawnSync } = require('node:child_process');
+const { ensureAwakeForPrinterUri } = require('../lib/device-wake');
 
 function run(command, args, timeout = 10_000) {
   const result = spawnSync(command, args, {
@@ -58,6 +59,10 @@ async function listPrinters() {
 
 /** Print a file by calling lp with arg-array execution. */
 async function printFile(filePath, printerName, opts = {}) {
+  // Best-effort: wake the target before submitting so the job doesn't sit
+  // stuck in CUPS waiting on a sleeping USB or network printer.
+  await ensureAwakeForPrinterUri(getUrisByPrinter()[printerName]);
+
   const copies = Number.parseInt(String(opts.copies || '1'), 10);
   const args = ['-d', printerName, '-n', Number.isInteger(copies) && copies > 0 ? String(copies) : '1'];
 

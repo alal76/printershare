@@ -9,6 +9,7 @@ const mime   = require('mime-types');
 const { withScanLock } = require('../lib/device-lock');
 const { isNative } = require('../lib/deployment');
 const { getDefaultScanner } = require('../lib/scanner-prefs');
+const { ensureAwakeForScanDevice } = require('../lib/device-wake');
 
 const SCANS_PATH  = process.env.SCANS_PATH || '/scans';
 const SCANSERVJS_URL = process.env.SCANSERVJS_URL || (isNative() ? 'http://127.0.0.1:8080' : 'http://ps-scanservjs:8080');
@@ -191,7 +192,8 @@ router.post('/run', async (req, res) => {
           return { status: 503, body: { error: 'scanservjs context unavailable' } };
         }
         const ctx = await ctxRes.json();
-        const device = ctx.devices?.[0];
+        const preferred = getDefaultScanner();
+        const device = (preferred && ctx.devices?.find(d => d.id === preferred)) || ctx.devices?.[0];
         if (!device) {
           return { status: 404, body: { error: 'No scanner detected' } };
         }
@@ -204,6 +206,11 @@ router.post('/run', async (req, res) => {
           index:    userPayload.index    ?? 1,
         };
       }
+
+      // Best-effort: resume the scanner from USB autosuspend before
+      // submitting, so the job doesn't sit stuck waiting on a sleeping
+      // device.
+      ensureAwakeForScanDevice(payload.params?.deviceId);
 
       const upstream = await fetch(`${SCANSERVJS_URL}/api/v1/scan`, {
         method:  'POST',
